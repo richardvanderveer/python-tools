@@ -1,0 +1,28 @@
+# PyInstaller output
+build/
+dist/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Config (kan HF token bevatten)
+config.ini
+*.ini
+
+# Tijdelijke bestanden
+*.tmp
+*.wav
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Exe via Releases
+*.exe

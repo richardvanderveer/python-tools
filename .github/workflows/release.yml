@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "transcribe/v*"
+      - "audioforge/v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: App bepalen
+        id: app
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $app = $tag.Split("/")[0]
+          $ver = $tag.Split("/")[1]
+          echo "name=$app" >> $env:GITHUB_OUTPUT
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Torch CPU (transcribe)
+        if: steps.app.outputs.name == 'transcribe'
+        run: pip install torch==2.10.0 torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Dependencies
+        run: pip install -r ${{ steps.app.outputs.name }}/requirements.txt
+
+      - name: PyInstaller
+        run: pip install pyinstaller==6.19.0
+
+      - name: Exe bouwen
+        run: python -m PyInstaller ${{ steps.app.outputs.name }}/${{ steps.app.outputs.name }}.spec
+
+      - name: ffmpeg kopieren
+        shell: pwsh
+        run: |
+          if (Test-Path "ffmpeg") {
+            Copy-Item ffmpeg\*.exe dist\${{ steps.app.outputs.name }}\ }
+
+      - name: Release publiceren
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ steps.app.outputs.name }} ${{ steps.app.outputs.version }}"
+          files: dist/${{ steps.app.outputs.name }}.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
