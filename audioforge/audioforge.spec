@@ -42,5 +42,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['C:\\Users\\richa\\OneDrive\\Bureaublad\\Python\\scripts\\baseline\\Claude\\AudioForge converter\\audioconvert.ico'],
+	icon=['audioconvert.ico'],
 )
