@@ -1,11 +1,11 @@
 """
-AudioForge 1.0.3 – Audio Converter & Editor
+AudioForge 2.0.0 – Audio Converter & Editor
 Windows 11 – Python 3.14 compatible
 Drag-drop via tkinterdnd2
 """
 # ── Watermerk ────────────────────────────────────────────────
 __author__    = "Richard van der Veer"
-__version__   = "1.0.3"
+__version__   = "2.0.0"
 __build__     = "2026-04-03"
 __copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
 __watermark__ = "RVDV-AUDIOFORGE-2026-PYTHON-TOOLS"
