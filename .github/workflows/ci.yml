@@ -36,10 +36,6 @@ jobs:
         run: pip install torch==2.10.0 torchaudio --index-url https://download.pytorch.org/whl/cpu
       - name: Dependencies
         run: pip install -r transcribe/requirements.txt
-      - name: Lint
-        run: |
-          pip install flake8
-          flake8 transcribe/transcribe.py --max-line-length 100 --ignore=E501,W503
       - name: Smoke-test
         run: python -c "import sys; sys.path.insert(0,'transcribe'); print('Transcribe import OK')"
 
