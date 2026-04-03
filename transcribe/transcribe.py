@@ -5,12 +5,17 @@ Bestand  : transcribe.py
 Map      : C:/Users/richa/OneDrive/Bureaublad/Python/scripts/baseline/Claude/Transcribreer/
 Icoon    : transcribt.ico  (zelfde map als dit script)
 
-Versie   : 1.3
+Versie   : 1.0.4
 Engine   : faster-whisper 1.2.1 + pyannote.audio 4.x
 Start    : python transcribe.py
 Tests    : python transcribe.py --test
 """
-
+# ── Watermerk ─────────────────────────────────────────────────
+__author__    = "Richard van der Veer" 
+__version__   = "1.0.4" 
+__build__     = "2026-04-03"
+__copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
+__watermark__ = "RVDV-TRANSCRIBE-2026-PYTHON-TOOLS"
 from __future__ import annotations
 
 import argparse
