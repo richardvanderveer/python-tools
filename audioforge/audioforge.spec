@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('C:\\Users\\richa\\OneDrive\\Bureaublad\\Python\\scripts\\baseline\\Claude\\AudioForge converter\\audioconvert.ico', '.')]
+datas = [('audioconvert.ico', '.')]
 binaries = []
 hiddenimports = ['sounddevice', 'soundfile', 'cffi']
 tmp_ret = collect_all('tkinterdnd2')
@@ -42,5 +42,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['C:\\Users\\richa\\OneDrive\\Bureaublad\\Python\\scripts\\baseline\\Claude\\AudioForge converter\\audioconvert.ico'],
+    icon=['audioconvert.ico'],
 )
