@@ -5,7 +5,7 @@ Bestand  : transcribe.py
 Map      : C:/Users/richa/OneDrive/Bureaublad/Python/scripts/baseline/Claude/Transcribreer/
 Icoon    : transcribt.ico  (zelfde map als dit script)
 
-Versie   : 2.0.0
+Versie   : 2.0.1
 Engine   : faster-whisper 1.2.1 + pyannote.audio 4.x
 Start    : python transcribe.py
 Tests    : python transcribe.py --test
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 # ── Watermerk ─────────────────────────────────────────────────
 __author__    = "Richard van der Veer" 
-__version__   = "2.0.0" 
+__version__   = "2.0.1" 
 __build__     = "2026-04-03"
 __copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
 __watermark__ = "RVDV-TRANSCRIBE-2026-PYTHON-TOOLS"
@@ -49,8 +49,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("Transcribe")
 
-APP_VERSION    = "1.3"
-APP_TITLE      = f"Transcribe v{APP_VERSION}"
+APP_TITLE      = f"Transcribe v{__version__}"
 GITHUB_VERSION = "https://raw.githubusercontent.com/richardvanderveer/transcribe-app/main/version.txt"
 GITHUB_REPO    = "https://github.com/richardvanderveer/transcribe-app"
 
@@ -150,13 +149,13 @@ def _check_update(callback: Callable[[str], None]) -> None:
             import urllib.request
             with urllib.request.urlopen(GITHUB_VERSION, timeout=5) as resp:
                 remote = resp.read().decode().strip()
-            local_parts  = [int(x) for x in APP_VERSION.split(".")]
+            local_parts  = [int(x) for x in __version__.split(".")]
             remote_parts = [int(x) for x in remote.split(".")]
             if remote_parts > local_parts:
-                log.info("Update beschikbaar: v%s -> v%s", APP_VERSION, remote)
+                log.info("Update beschikbaar: v%s -> v%s", __version__, remote)
                 callback(remote)
             else:
-                log.debug("App is up-to-date (v%s)", APP_VERSION)
+                log.debug("App is up-to-date (v%s)", __version__)
         except Exception as exc:
             log.debug("Update-check mislukt: %s", exc)
     threading.Thread(target=_run, daemon=True).start()
