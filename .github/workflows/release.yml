@@ -23,9 +23,21 @@ jobs:
           echo "name=$app" >> $env:GITHUB_OUTPUT
           echo "version=$ver" >> $env:GITHUB_OUTPUT
 
+      - name: Python versie bepalen
+        id: pyver
+        shell: pwsh
+        run: |
+          if ($env:APP -eq "ocr") {
+            echo "version=3.12" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "version=3.14" >> $env:GITHUB_OUTPUT
+          }
+        env:
+          APP: ${{ steps.app.outputs.name }}
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: ${{ steps.pyver.outputs.version }}
 
       - name: Torch CPU (transcribe)
         if: steps.app.outputs.name == 'transcribe'
