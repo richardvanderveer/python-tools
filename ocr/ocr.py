@@ -48,7 +48,7 @@ _AppBase = _dnd.Tk if _DND_AVAILABLE else tk.Tk
 # LAYER 1 — CONFIG
 # ─────────────────────────────────────────────
 APP_NAME    = "OCR Pro"
-APP_VERSION = "1.0.0-mvp"
+APP_VERSION = "1.0.3"
 
 ONEDRIVE_DESKTOP = Path.home() / "OneDrive" / "Bureaublad"
 NORMAL_DESKTOP   = Path.home() / "Desktop"
