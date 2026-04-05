@@ -36,6 +36,14 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+try:
+    import tkinterdnd2 as _dnd
+    _DND_AVAILABLE = True
+except ImportError:
+    _DND_AVAILABLE = False
+
+_AppBase = _dnd.Tk if _DND_AVAILABLE else tk.Tk
+
 # ─────────────────────────────────────────────
 # LAYER 1 — CONFIG
 # ─────────────────────────────────────────────
@@ -425,7 +433,7 @@ def run_export(text: str, output_format: str, output_dir: str, stem: str) -> str
 # ─────────────────────────────────────────────
 # LAYER 6 — GUI (tkinter)
 # ─────────────────────────────────────────────
-class App(tk.Tk):
+class App(_AppBase):
     def __init__(self):
         super().__init__()
         self.title(f"{APP_NAME} {APP_VERSION}")
@@ -462,9 +470,14 @@ class App(tk.Tk):
         frm = ttk.LabelFrame(self, text="Instellingen")
         frm.pack(fill="x", padx=10, pady=8)
 
-        # Rij 0: inputbestand
-        ttk.Label(frm, text="Inputbestand").grid(row=0, column=0, sticky="w", **pad)
-        ttk.Entry(frm, textvariable=self.input_var, width=100).grid(row=0, column=1, sticky="ew", **pad)
+        # Rij 0: inputbestand (+ drag-and-drop)
+        lbl_input = "Inputbestand (of sleep hierheen)" if _DND_AVAILABLE else "Inputbestand"
+        ttk.Label(frm, text=lbl_input).grid(row=0, column=0, sticky="w", **pad)
+        self._input_entry = ttk.Entry(frm, textvariable=self.input_var, width=100)
+        self._input_entry.grid(row=0, column=1, sticky="ew", **pad)
+        if _DND_AVAILABLE:
+            self._input_entry.drop_target_register(_dnd.DND_FILES)
+            self._input_entry.dnd_bind("<<Drop>>", self._on_drop)
         ttk.Button(frm, text="Selecteer", command=self._select_input).grid(row=0, column=2, **pad)
 
         # Rij 1: outputmap
@@ -529,6 +542,15 @@ class App(tk.Tk):
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
         self.update_idletasks()
+
+    # ── Drag-and-drop ──────────────────────────
+    def _on_drop(self, event):
+        path = event.data.strip()
+        # tkinterdnd2 omsluiting bij paden met spaties: {C:\pad met spaties\bestand.png}
+        if path.startswith("{") and path.endswith("}"):
+            path = path[1:-1]
+        self.input_var.set(path)
+        self.log(f"Input (drag-and-drop): {os.path.basename(path)}")
 
     # ── Bestandskeuze ──────────────────────────
     def _select_input(self):
