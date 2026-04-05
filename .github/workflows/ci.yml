@@ -12,6 +12,7 @@ jobs:
     outputs:
       transcribe: ${{ steps.filter.outputs.transcribe }}
       audioforge: ${{ steps.filter.outputs.audioforge }}
+      ocr: ${{ steps.filter.outputs.ocr }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -22,6 +23,8 @@ jobs:
               - 'transcribe/**'
             audioforge:
               - 'audioforge/**'
+            ocr:
+              - 'ocr/**'
 
   test-transcribe:
     needs: changes
@@ -37,7 +40,7 @@ jobs:
       - name: Dependencies
         run: pip install -r transcribe/requirements.txt
       - name: Smoke-test
-        run: python -c "import sys; sys.path.insert(0,'transcribe'); print('Transcribe import OK')"
+        run: python -c "import sys; sys.path.insert(0,'transcribe'); print('Transcribe OK')"
 
   test-audioforge:
     needs: changes
@@ -51,4 +54,18 @@ jobs:
       - name: Dependencies
         run: pip install -r audioforge/requirements.txt
       - name: Smoke-test
-        run: python -c "import sys; sys.path.insert(0,'audioforge'); print('AudioForge import OK')"
+        run: python -c "import sys; sys.path.insert(0,'audioforge'); print('AudioForge OK')"
+
+  test-ocr:
+    needs: changes
+    if: needs.changes.outputs.ocr == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Dependencies
+        run: pip install -r ocr/requirements.txt
+      - name: Smoke-test
+        run: python ocr/smoke_test.py

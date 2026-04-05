@@ -5,6 +5,7 @@ on:
     tags:
       - "transcribe/v*"
       - "audioforge/v*"
+      - "ocr/v*"
 
 jobs:
   build:
