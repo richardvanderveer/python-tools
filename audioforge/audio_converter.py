@@ -77,6 +77,12 @@ def hms2s(t):
     except:
         return 0.0
 
+def _dec_args(path: str) -> list:
+    """Gebruik libopus decoder voor OGG/Opus — voorkomt storing door ffmpeg native decoder."""
+    if os.path.splitext(path)[1].lower() in ('.ogg', '.opus'):
+        return ['-acodec', 'libopus']
+    return []
+
 def ffbg(*args, on_done=None, on_error=None):
     def _r():
         _flags = 0x08000000 if sys.platform == 'win32' else 0
@@ -117,158 +123,83 @@ def load_waveform(path, n=1600):
     except:
         return None
 
-# ── player via sounddevice ────────────────────────────────────────────────────
-try:
-    import sounddevice as sd
-    import soundfile as sf
-    HAS_SD = True
-except ImportError:
-    HAS_SD = False
-
+# ── player ────────────────────────────────────────────────────────────────────
 class Player:
     """
-    Speelt audio via sounddevice + ffmpeg decode.
-    Geeft exacte positie en volume-controle.
+    Speelt audio af via Windows 'start' commando — identiek aan dubbelklikken
+    in Verkenner. Gebruikt de standaard Windows 11 Mediaspeler (geen storing).
+    Positie via wall-clock. Volume niet instelbaar (beperking van shell-open).
     """
     def __init__(self):
-        self._stream  = None
-        self._data    = None   # numpy float32 array (frames, ch)
-        self._sr      = 44100
-        self._pos     = 0      # huidige frame
-        self._active  = False
-        self._vol     = 1.0
-        self._dur     = 0.0
-        self._tmp     = None
-        self._lock    = threading.Lock()
+        self._proc   = None
+        self._active = False
+        self._offset = 0.0
+        self._t0     = 0.0
+        self._vol    = 1.0
+        self._dur    = 0.0
 
     def set_volume(self, v):
         self._vol = max(0.0, min(1.0, float(v)))
 
     def play(self, path, offset=0.0):
-        self._stop_stream()
-        self._active  = True
-        self._pos     = 0
-        self._data    = None
-        self._offset  = offset        # bewaar offset voor wall-clock fallback
-        self._t_start = time.time()   # wall-clock start
-        threading.Thread(target=self._decode, args=(path, offset), daemon=True).start()
+        self.stop()
+        self._active = True
+        self._offset = offset
+        self._t0     = time.time()
+
+        if FFPLAY:
+            # ffplay met libopus decoder — geen storing bij OGG/Opus
+            _flags = 0x08000000 if sys.platform == 'win32' else 0
+            _is_opus = os.path.splitext(path)[1].lower() in ('.ogg', '.opus')
+            args = [FFPLAY, '-nodisp', '-autoexit', '-loglevel', 'quiet']
+            if _is_opus:
+                args += ['-acodec', 'libopus']
+            if offset > 0:
+                args += ['-ss', str(offset)]
+            args.append(path)
+            self._proc = subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=_flags)
+        elif sys.platform == 'win32':
+            self._proc = subprocess.Popen(
+                ['cmd', '/c', 'start', '', '/wait', path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=0x08000000)
+        else:
+            self._proc = subprocess.Popen(['xdg-open', path])
 
     def stop(self):
         self._active = False
-        self._stop_stream()
-        self._cleanup_tmp()
+        if self._proc and self._proc.poll() is None:
+            try:
+                # Stop het gehele process-tree (incl. mediaspeler)
+                subprocess.run(
+                    ['taskkill', '/F', '/T', '/PID', str(self._proc.pid)],
+                    capture_output=True,
+                    creationflags=0x08000000)
+            except Exception:
+                try: self._proc.terminate()
+                except: pass
+        self._proc = None
 
     def playing(self):
-        return self._active
+        if not self._active:
+            return False
+        if self._proc and self._proc.poll() is not None:
+            self._active = False
+            return False
+        return True
 
     def pos(self):
         if not self._active:
             return None
-        if self._data is not None and self._sr > 0:
-            # Exacte positie via frame-teller
-            return self._pos / self._sr
-        else:
-            # Nog aan het decoderen: schat via wall-clock
-            return self._offset + (time.time() - self._t_start)
+        return self._offset + (time.time() - self._t0)
 
     def dur(self):
         return self._dur
-
-    # ── intern ────────────────────────────────────────────────────────────────
-    def _stop_stream(self):
-        with self._lock:
-            if self._stream is not None:
-                try:
-                    self._stream.abort(ignore_errors=True)
-                    self._stream.close(ignore_errors=True)
-                except Exception:
-                    pass
-                self._stream = None
-
-    def _cleanup_tmp(self):
-        if self._tmp and os.path.isfile(self._tmp):
-            try: os.unlink(self._tmp)
-            except: pass
-        self._tmp = None
-
-    def _decode(self, path, offset):
-        """Achtergrondthread: ffmpeg → tijdelijke WAV → numpy → stream."""
-        try:
-            tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
-            tmp.close()
-            self._tmp = tmp.name
-
-            _flags = 0x08000000 if sys.platform == 'win32' else 0
-            result = subprocess.run(
-                [FFMPEG, '-y', '-v', 'quiet',
-                 '-i', path,
-                 '-f', 'wav', '-ar', '44100', '-ac', '2',
-                 self._tmp],
-                capture_output=True,
-                creationflags=_flags,
-                timeout=120)
-
-            if not self._active:
-                self._cleanup_tmp()
-                return
-
-            if result.returncode != 0 or not os.path.isfile(self._tmp):
-                self._active = False
-                self._cleanup_tmp()
-                return
-
-            data, sr = sf.read(self._tmp, dtype='float32', always_2d=True)
-            self._cleanup_tmp()
-
-            if not self._active:
-                return
-
-            self._data = data
-            self._sr   = sr
-            self._dur  = len(data) / sr
-            # spring naar offset
-            start_frame = max(0, min(int(offset * sr), len(data) - 1))
-            self._pos   = start_frame
-
-            self._start_stream()
-
-        except Exception as exc:
-            self._active = False
-            self._cleanup_tmp()
-
-    def _start_stream(self):
-        if not self._active or self._data is None:
-            return
-
-        def _callback(outdata, frames, time_info, status):
-            with self._lock:
-                if not self._active or self._data is None:
-                    outdata[:] = 0
-                    raise sd.CallbackStop()
-                end   = self._pos + frames
-                chunk = self._data[self._pos:end]
-                n     = len(chunk)
-                if n > 0:
-                    outdata[:n] = chunk * self._vol
-                if n < frames:
-                    outdata[n:] = 0
-                    self._pos  += n
-                    self._active = False
-                    raise sd.CallbackStop()
-                self._pos += frames
-
-        try:
-            with self._lock:
-                self._stream = sd.OutputStream(
-                    samplerate=self._sr,
-                    channels=self._data.shape[1],
-                    dtype='float32',
-                    callback=_callback,
-                    blocksize=1024,
-                    finished_callback=lambda: None)
-                self._stream.start()
-        except Exception as exc:
-            self._active = False
 
 
 # ── themes ────────────────────────────────────────────────────────────────────
@@ -523,7 +454,7 @@ class App(_Base):
     def __init__(self):
         super().__init__()
         check_ffmpeg()
-        self._tn = 'dark'; self.T = THEMES['dark']
+        self._tn = 'light'; self.T = THEMES['light']
 
         self.title('AudioForge v4')
         self.geometry('1300x840'); self.minsize(1000, 680)
@@ -600,7 +531,7 @@ class App(_Base):
         hdr.pack(fill='x'); hdr.pack_propagate(False)
         tk.Label(hdr, text='AudioForge', bg=T['SURF'], fg=T['FG'],
                  font=('Segoe UI', 14, 'bold')).pack(side='left', padx=16, pady=10)
-        tk.Label(hdr, text='v4  ·  audio converter & editor',
+        tk.Label(hdr, text=f'v{__version__}  ·  {__build__}  ·  audio converter & editor',
                  bg=T['SURF'], fg=T['FGD'],
                  font=('Segoe UI', 9)).pack(side='left', pady=14)
         if not HAS_DND:
@@ -768,7 +699,7 @@ class App(_Base):
         self._hdr(c3, 'Uitvoermap')
         oc = self._card(c3)
         oi = tk.Frame(oc, bg=T['SURF']); oi.pack(fill='x', padx=8, pady=(6,8))
-        self.v_out = tk.StringVar(value=os.path.expanduser('~\\Desktop'))
+        self.v_out = tk.StringVar(value='')
         ttk.Entry(oi, textvariable=self.v_out).pack(side='left', fill='x', expand=True)
         ttk.Button(oi, text='…', style='W.TButton', width=3,
                    command=self._pick_out).pack(side='left', padx=(4,0))
@@ -919,7 +850,7 @@ class App(_Base):
 
     def __tick(self):
         # Zolang player actief is blijven we tiken
-        if not self._pl._active:
+        if not self._pl.playing():
             # Afspelen klaar
             if self.wv.dur:
                 self.wv.set_cur(None); self.wv.draw()
@@ -967,7 +898,8 @@ class App(_Base):
         if not f: return
         out = os.path.join(self._od(), os.path.splitext(f['name'])[0] + '.mp3')
         self._st(f"Converteren: {f['name']} …")
-        ffbg('-i', f['path'], '-b:a', self.v_br.get(), out,
+        ffbg(*_dec_args(f['path']), '-i', f['path'], '-vn',
+            '-c:a', 'libmp3lame', '-b:a', self.v_br.get(), out,
             on_done=lambda: self.after(0, lambda: self._done(f'✓  {os.path.basename(out)}')),
             on_error=lambda e: self.after(0, lambda: self._err(e)))
 
@@ -980,7 +912,9 @@ class App(_Base):
             for f in self.files:
                 out = os.path.join(od, os.path.splitext(f['name'])[0] + '.mp3')
                 try:
-                    subprocess.run([FFMPEG, '-y', '-i', f['path'], '-b:a', br, out],
+                    subprocess.run([FFMPEG, '-y', *_dec_args(f['path']),
+                                        '-i', f['path'], '-vn',
+                                        '-c:a', 'libmp3lame', '-b:a', br, out],
                                    capture_output=True, check=True,
                                    creationflags=0x08000000 if sys.platform=='win32' else 0)
                 except: errs.append(f['name'])
@@ -999,20 +933,40 @@ class App(_Base):
         if not out: return
         self._st('Samenvoegen …')
         def _m():
-            with tempfile.NamedTemporaryFile('w', suffix='.txt',
-                                             delete=False, encoding='utf-8') as tf:
-                for f in self.files: tf.write(f"file '{f['path']}'\n")
-                tp = tf.name
+            _fl  = 0x08000000 if sys.platform == 'win32' else 0
+            tmps = []
             try:
-                subprocess.run([FFMPEG, '-y', '-f', 'concat', '-safe', '0',
-                                '-i', tp, '-b:a', self.v_br.get(), out],
-                               capture_output=True, check=True,
-                               creationflags=0x08000000 if sys.platform=='win32' else 0)
+                # Stap 1: decodeer elk bestand naar tijdelijke WAV
+                # OGG/Opus via libopus decoder (geen storing), rest direct
+                for i, f in enumerate(self.files):
+                    tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+                    tmp.close()
+                    tmps.append(tmp.name)
+                    is_opus = os.path.splitext(f['path'])[1].lower() in ('.ogg', '.opus')
+                    dec = ['-acodec', 'libopus'] if is_opus else []
+                    subprocess.run(
+                        [FFMPEG, '-y', '-v', 'quiet', *dec,
+                         '-i', f['path'], '-ar', '44100', '-ac', '2', tmp.name],
+                        capture_output=True, check=True, creationflags=_fl)
+                    self.after(0, lambda i=i: self._st(f'Decoderen {i+1}/{len(self.files)} …'))
+
+                # Stap 2: concat alle WAVs en encodeer naar MP3
+                with tempfile.NamedTemporaryFile('w', suffix='.txt',
+                                                  delete=False, encoding='utf-8') as tf:
+                    for t in tmps: tf.write(f"file '{t}'\n")
+                    tp = tf.name
+                subprocess.run(
+                    [FFMPEG, '-y', '-f', 'concat', '-safe', '0',
+                     '-i', tp, '-c:a', 'libmp3lame', '-b:a', self.v_br.get(), out],
+                    capture_output=True, check=True, creationflags=_fl)
                 self.after(0, lambda: self._done(f'✓  {os.path.basename(out)}'))
             except subprocess.CalledProcessError as e:
                 err = e.stderr.decode(errors='replace')
                 self.after(0, lambda: self._err(err))
-            finally: os.unlink(tp)
+            finally:
+                for t in tmps:
+                    if os.path.isfile(t): os.unlink(t)
+                if 'tp' in dir() and os.path.isfile(tp): os.unlink(tp)
         threading.Thread(target=_m, daemon=True).start()
 
     def _save_fragment(self):
@@ -1026,8 +980,9 @@ class App(_Base):
             filetypes=[('MP3', '*.mp3'), ('Alle', '*.*')])
         if not out: return
         self._st('Fragment opslaan …')
-        ffbg('-ss', str(s), '-t', str(e-s), '-i', f['path'],
-            '-b:a', self.v_br.get(), out,
+        ffbg(*_dec_args(f['path']), '-ss', str(s), '-t', str(e-s),
+            '-i', f['path'], '-vn',
+            '-c:a', 'libmp3lame', '-b:a', self.v_br.get(), out,
             on_done=lambda: self.after(0, lambda: self._done(f'✓  {os.path.basename(out)}')),
             on_error=lambda e2: self.after(0, lambda: self._err(e2)))
 
@@ -1058,17 +1013,22 @@ class App(_Base):
             try:
                 parts = []
                 # Deel vóór de selectie
+                _af = _af_for(f['path'])  # buiten if-blok zodat altijd beschikbaar
                 if s > 0.1:
-                    p1 = os.path.join(od, f'__part1_{base}.mp3')
-                    subprocess.run([FFMPEG, '-y', '-i', f['path'],
-                                    '-t', str(s), '-b:a', self.v_br.get(), p1],
+                    p1  = os.path.join(od, f'__part1_{base}.mp3')
+                    subprocess.run([FFMPEG, '-y', *_af,
+                                    '-i', f['path'],
+                                    '-t', str(s), '-vn',
+                                    '-c:a', 'libmp3lame', '-b:a', self.v_br.get(), p1],
                                    capture_output=True, check=True, creationflags=_fl)
                     parts.append(p1)
                 # Deel na de selectie
                 if e < dur - 0.1:
                     p2 = os.path.join(od, f'__part2_{base}.mp3')
-                    subprocess.run([FFMPEG, '-y', '-ss', str(e), '-i', f['path'],
-                                    '-b:a', self.v_br.get(), p2],
+                    subprocess.run([FFMPEG, '-y', *_af,
+                                    '-ss', str(e), '-i', f['path'],
+                                    '-vn',
+                                    '-c:a', 'libmp3lame', '-b:a', self.v_br.get(), p2],
                                    capture_output=True, check=True, creationflags=_fl)
                     parts.append(p2)
 
@@ -1131,11 +1091,14 @@ class App(_Base):
         def _s():
             try:
                 _fl = 0x08000000 if sys.platform == 'win32' else 0
-                subprocess.run([FFMPEG, '-y', '-i', f['path'], '-t', str(at),
-                                '-b:a', self.v_br.get(), o1],
+                _dec = _dec_args(f['path'])
+                subprocess.run([FFMPEG, '-y', *_dec, '-i', f['path'], '-t', str(at),
+                                '-vn',
+                                '-c:a', 'libmp3lame', '-b:a', self.v_br.get(), o1],
                                capture_output=True, check=True, creationflags=_fl)
-                subprocess.run([FFMPEG, '-y', '-ss', str(at), '-i', f['path'],
-                                '-b:a', self.v_br.get(), o2],
+                subprocess.run([FFMPEG, '-y', *_dec, '-ss', str(at), '-i', f['path'],
+                                '-vn',
+                                '-c:a', 'libmp3lame', '-b:a', self.v_br.get(), o2],
                                capture_output=True, check=True, creationflags=_fl)
                 msg = (f'✓  Deel 1: {os.path.basename(o1)}\n'
                        f'   Deel 2: {os.path.basename(o2)}')
@@ -1152,7 +1115,15 @@ class App(_Base):
         if d: self.v_out.set(d)
 
     def _od(self):
-        d = self.v_out.get(); os.makedirs(d, exist_ok=True); return d
+        d = self.v_out.get().strip()
+        if not d:
+            from tkinter import filedialog as _fd
+            d = _fd.askdirectory(title='Kies uitvoermap')
+            if not d:
+                raise ValueError('Geen uitvoermap gekozen.')
+            self.v_out.set(d)
+        os.makedirs(d, exist_ok=True)
+        return d
 
     def _gf(self):
         if self.sel_idx is None or self.sel_idx >= len(self.files):
