@@ -5,7 +5,7 @@ Drag-drop via tkinterdnd2
 """
 # ── Watermerk ────────────────────────────────────────────────
 __author__    = "Richard van der Veer"
-__version__   = "2.0.1"
+__version__   = "2.1.2"
 __build__     = "2026-04-03"
 __copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
 __watermark__ = "RVDV-AUDIOFORGE-2026-PYTHON-TOOLS"
