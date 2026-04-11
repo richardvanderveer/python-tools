@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+datas = [('ocr.ico', '.')]
 binaries = []
 hiddenimports = ['pytesseract', 'PIL', 'cv2', 'docx', 'openpyxl', 'pptx']
 tmp_ret = collect_all('tkinterdnd2')
@@ -41,4 +41,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['ocr.ico'],
 )
