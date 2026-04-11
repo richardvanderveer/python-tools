@@ -14,8 +14,8 @@ from __future__ import annotations
 
 # ── Watermerk ─────────────────────────────────────────────────
 __author__    = "Richard van der Veer" 
-__version__   = "2.0.1" 
-__build__     = "2026-04-03"
+__version__   = "2.1.0" 
+__build__     = "2026-04-11"
 __copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
 __watermark__ = "RVDV-TRANSCRIBE-2026-PYTHON-TOOLS"
 
@@ -440,11 +440,16 @@ class TranscribeWorker:
         lang = None if self.language == "auto" else self.language
         detected_lang = self.language
         try:
+            # Modus 3: vad_filter UIT + word_timestamps AAN
+            # Pyannote doet segmentatie op stemkenmerken per woord
+            use_vad = (self.output_mode != "3")
             segments_gen, info = fw_model.transcribe(
                 tmp_wav,
                 language=lang,
                 beam_size=5,
                 word_timestamps=(self.output_mode in ("2", "3", "4")),
+                vad_filter=use_vad,
+                vad_parameters=dict(min_silence_duration_ms=500) if use_vad else {},
             )
             detected_lang = info.language
             log.info("Taal gedetecteerd: %s (%.0f%%)",
@@ -454,11 +459,14 @@ class TranscribeWorker:
             for seg in segments_gen:
                 if self._stop_event.is_set():
                     break
-                segments.append({
+                seg_dict = {
                     "start": seg.start,
                     "end":   seg.end,
                     "text":  seg.text,
-                })
+                }
+                if self.output_mode == "3" and seg.words:
+                    seg_dict["words"] = [(w.start, w.end, w.word) for w in seg.words]
+                segments.append(seg_dict)
                 if duration > 0:
                     fraction = 0.20 + (seg.end / duration) * 0.55
                     self.on_progress(
@@ -523,49 +531,92 @@ class TranscribeWorker:
 
         diarization = pipeline(wav_path, **kwargs)
 
+        # Beide pyannote API versies ondersteunen:
+        # speaker-diarization-3.1         → Annotation    → .itertracks(yield_label=True)
+        # speaker-diarization-community-1 → DiarizeOutput → .speaker_diarization
         tracks: list[tuple] = []
-        try:
+        if hasattr(diarization, "itertracks"):
             for turn, _, speaker in diarization.itertracks(yield_label=True):
                 tracks.append((turn, speaker))
-        except AttributeError:
+        elif hasattr(diarization, "speaker_diarization"):
             for turn, speaker in diarization.speaker_diarization:
                 tracks.append((turn, speaker))
+        else:
+            log.error("Onbekend diarisatie-type: %s", type(diarization))
 
         unique = set(sp for _, sp in tracks)
-        log.info("Unieke sprekers: %d (%s)", len(unique), sorted(unique))
+        log.info("Tracks: %d | Unieke sprekers: %d (%s)",
+                 len(tracks), len(unique), sorted(unique))
+
+        if not tracks:
+            for seg in segments:
+                seg["speaker"] = "Spreker ?"
+            return segments
 
         speaker_map: dict[str, str] = {}
         speaker_counter = 0
 
+        def _label(raw_speaker: str) -> str:
+            nonlocal speaker_counter
+            if raw_speaker not in speaker_map:
+                speaker_counter += 1
+                speaker_map[raw_speaker] = f"Spreker {chr(64 + speaker_counter)}"
+            return speaker_map[raw_speaker]
+
+        def _best_for(t_start: float, t_end: float) -> str:
+            """Geeft de best passende spreker voor tijdvak [t_start, t_end]."""
+            best_sp, best_ov = None, 0.0
+            for turn, sp in tracks:
+                ov = min(turn.end, t_end) - max(turn.start, t_start)
+                if ov > best_ov:
+                    best_ov, best_sp = ov, sp
+            if best_sp is None:
+                mid = (t_start + t_end) / 2.0
+                best_sp = min(tracks,
+                              key=lambda x: abs((x[0].start + x[0].end) / 2 - mid))[1]
+            return _label(best_sp)
+
+        # ── Woord-niveau matching (modus 3 met word_timestamps) ───────
+        has_words = any("words" in seg for seg in segments)
+        if has_words:
+            log.info("Woord-niveau diarisatie")
+            word_entries: list[tuple] = []
+            for seg in segments:
+                words = seg.get("words") or []
+                if words:
+                    for w_start, w_end, w_text in words:
+                        word_entries.append((w_start, w_end, w_text,
+                                             _best_for(w_start, w_end)))
+                else:
+                    word_entries.append((seg["start"], seg["end"], seg["text"],
+                                         _best_for(seg["start"], seg["end"])))
+
+            # Groepeer aaneengesloten woorden van dezelfde spreker
+            new_segs: list[dict] = []
+            if word_entries:
+                g_sp    = word_entries[0][3]
+                g_start = word_entries[0][0]
+                g_end   = word_entries[0][1]
+                g_text  = word_entries[0][2]
+                for w_start, w_end, w_text, sp in word_entries[1:]:
+                    if sp == g_sp:
+                        g_end   = w_end
+                        g_text += w_text
+                    else:
+                        new_segs.append({"start": g_start, "end": g_end,
+                                          "text": g_text.strip(), "speaker": g_sp})
+                        g_sp, g_start, g_end, g_text = sp, w_start, w_end, w_text
+                new_segs.append({"start": g_start, "end": g_end,
+                                  "text": g_text.strip(), "speaker": g_sp})
+
+            log.info("Woord-diarisatie: %d segmenten | Sprekermap: %s",
+                     len(new_segs), speaker_map)
+            return new_segs
+
+        # ── Segment-niveau matching (fallback zonder word_timestamps) ──
+        log.info("Segment-niveau diarisatie")
         for seg in segments:
-            seg_start = seg["start"]
-            seg_end   = seg["end"]
-            best_speaker = None
-            best_overlap = 0.0
-
-            for turn, speaker in tracks:
-                overlap = min(turn.end, seg_end) - max(turn.start, seg_start)
-                if overlap > best_overlap:
-                    best_overlap = overlap
-                    best_speaker = speaker
-
-            if best_speaker is None:
-                min_dist = float("inf")
-                for turn, speaker in tracks:
-                    dist = min(abs(turn.start - seg_start),
-                               abs(turn.end - seg_end))
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_speaker = speaker
-
-            if best_speaker:
-                if best_speaker not in speaker_map:
-                    speaker_counter += 1
-                    speaker_map[best_speaker] = f"Spreker {chr(64 + speaker_counter)}"
-                seg["speaker"] = speaker_map[best_speaker]
-            else:
-                seg["speaker"] = "Spreker ?"
-
+            seg["speaker"] = _best_for(seg["start"], seg["end"])
         log.info("Sprekermap: %s", speaker_map)
         return segments
 
