@@ -1,19 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
-
-datas = [('ocr.ico', '.')]
-binaries = []
-hiddenimports = ['pytesseract', 'PIL', 'cv2', 'docx', 'openpyxl', 'pptx']
-tmp_ret = collect_all('tkinterdnd2')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 a = Analysis(
     ['ocr.py'],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
-    hookspath=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[
+        'pytesseract',
+        'PIL', 'PIL.Image', 'PIL.ImageOps', 'PIL.ImageFilter', 'PIL.ImageEnhance',
+        'cv2',
+        'docx',
+        'openpyxl',
+        'pptx',
+        'tkinterdnd2',
+    ],
+    hookspath=['.'],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
