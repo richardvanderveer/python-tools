@@ -14,7 +14,7 @@ from __future__ import annotations
 
 # ── Watermerk ─────────────────────────────────────────────────
 __author__    = "Richard van der Veer" 
-__version__   = "2.1.2" 
+__version__   = "2.1.3" 
 __build__     = "2026-04-13"
 __copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
 __watermark__ = "RVDV-TRANSCRIBE-2026-PYTHON-TOOLS"
@@ -44,7 +44,7 @@ warnings.filterwarnings("ignore", message="std():")
 
 # ── Logging: console + logbestand ────────────────────────────────────────────
 def _setup_logging() -> Path:
-    """Schrijft log naar %APPDATA%\TranscribeApp\transcribe.log (max 1 MB, 2 backups)."""
+    """Schrijft log naar APPDATA/TranscribeApp/transcribe.log (max 1 MB, 2 backups)."""
     import logging.handlers
     fmt = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -52,14 +52,10 @@ def _setup_logging() -> Path:
     )
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
-
-    # Console handler (INFO+)
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
     ch.setFormatter(fmt)
     root.addHandler(ch)
-
-    # Bestandshandler (DEBUG+, rotating)
     log_dir = (
         Path(os.environ.get("APPDATA", Path.home())) / "TranscribeApp"
         if sys.platform == "win32"
@@ -1189,6 +1185,7 @@ class AppController:
             if sys.platform == "win32":
                 os.startfile(str(_LOG_PATH))
             else:
+                import subprocess
                 subprocess.Popen(["xdg-open", str(_LOG_PATH)])
         except Exception as exc:
             self._show_error(f"Logbestand niet gevonden:\n{_LOG_PATH}\n{exc}")

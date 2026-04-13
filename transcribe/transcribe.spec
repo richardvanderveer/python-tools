@@ -1,11 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 datas = [('transcribt.ico', '.')]
 binaries = []
 hiddenimports = ['tkinterdnd2']
+
+# tkinterdnd2
 tmp_ret = collect_all('tkinterdnd2')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+
+# pyannote data-bestanden (config.yaml, etc.) — vereist in frozen exe
+datas += collect_data_files('pyannote.audio', includes=['**/*.yaml', '**/*.yml', '**/*.json'])
+datas += collect_data_files('pyannote.core', includes=['**/*.yaml', '**/*.yml'])
 
 a = Analysis(
     ['transcribe.py'],
