@@ -14,7 +14,7 @@ from __future__ import annotations
 
 # ── Watermerk ─────────────────────────────────────────────────
 __author__    = "Richard van der Veer" 
-__version__   = "2.1.0" 
+__version__   = "2.1.1" 
 __build__     = "2026-04-11"
 __copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
 __watermark__ = "RVDV-TRANSCRIBE-2026-PYTHON-TOOLS"
@@ -69,73 +69,78 @@ def _resolve_icon() -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Auto-patch pyannote io.py
+# Auto-patch pyannote — in-memory (werkt ook in frozen PyInstaller exe)
 # ---------------------------------------------------------------------------
 def _patch_pyannote() -> None:
+    """
+    Vervangt torchcodec AudioDecoder in pyannote.audio.core.io door een
+    soundfile-gebaseerde fallback. Werkt via sys.modules (in-memory),
+    zodat de patch ook in frozen PyInstaller exe werkt (geen schrijfrechten
+    naar _MEIPASS nodig).
+    """
     try:
-        import pyannote.audio
-        io_path = Path(pyannote.audio.__file__).parent / "core" / "io.py"
-        with open(io_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        if "_sf_fallback" in content:
-            log.debug("pyannote io.py patch al actief")
+        import soundfile as _sf
+        import torch as _torch
+
+        class _AudioStreamMetadata:
+            def __init__(self, path):
+                info = _sf.info(path)
+                self.duration_seconds_from_header = info.duration
+                self.sample_rate  = info.samplerate
+                self.num_frames   = info.frames
+                self.num_channels = info.channels
+                self.duration     = info.duration
+
+        class _AudioSamples:
+            def __init__(self, data, sample_rate):
+                self.data        = data
+                self.sample_rate = sample_rate
+                self.pts_seconds = 0.0
+
+        class _AudioDecoder:
+            def __init__(self, path):
+                self._path  = path
+                self.metadata = _AudioStreamMetadata(path)
+
+            def get_all_samples(self):
+                data, sr = _sf.read(self._path, dtype="float32", always_2d=True)
+                return _AudioSamples(_torch.from_numpy(data.T), sr)
+
+            def get_samples_played_in_range(self, start, end):
+                sr    = self.metadata.sample_rate
+                data, _ = _sf.read(
+                    self._path,
+                    start=int(start * sr),
+                    stop=int(end * sr),
+                    dtype="float32",
+                    always_2d=True,
+                )
+                return _AudioSamples(_torch.from_numpy(data.T), sr)
+
+            def __iter__(self):
+                yield self.get_all_samples()
+
+        # Probeer torchcodec te importeren; patch alleen als dat mislukt
+        try:
+            from torchcodec.decoders import AudioDecoder  # noqa: F401
+            log.debug("torchcodec beschikbaar — pyannote patch niet nodig")
             return
-        old = "    from torchcodec.decoders import AudioDecoder, AudioStreamMetadata"
-        if old not in content:
-            log.debug("pyannote io.py: patch niet nodig")
-            return
-        new = """    from torchcodec.decoders import AudioDecoder, AudioStreamMetadata
-except Exception:
-    import soundfile as _sf_fallback
-    import torch as _torch_fallback
+        except Exception:
+            pass
 
-    class AudioStreamMetadata:
-        def __init__(self, path):
-            info = _sf_fallback.info(path)
-            self.duration_seconds_from_header = info.duration
-            self.sample_rate = info.samplerate
-            self.num_frames = info.frames
-            self.num_channels = info.channels
-            self.duration = info.duration
-
-    class _AudioSamples:
-        def __init__(self, data, sample_rate):
-            self.data = data
-            self.sample_rate = sample_rate
-            self.pts_seconds = 0.0
-
-    class AudioDecoder:
-        def __init__(self, path):
-            self._path = path
-            self.metadata = AudioStreamMetadata(path)
-
-        def get_all_samples(self):
-            data, sr = _sf_fallback.read(
-                self._path, dtype="float32", always_2d=True
-            )
-            waveform = _torch_fallback.from_numpy(data.T)
-            return _AudioSamples(waveform, sr)
-
-        def get_samples_played_in_range(self, start, end):
-            sr = self.metadata.sample_rate
-            start_frame = int(start * sr)
-            end_frame   = int(end * sr)
-            data, _ = _sf_fallback.read(
-                self._path,
-                start=start_frame,
-                stop=end_frame,
-                dtype="float32",
-                always_2d=True,
-            )
-            waveform = _torch_fallback.from_numpy(data.T)
-            return _AudioSamples(waveform, sr)
-
-        def __iter__(self):
-            yield self.get_all_samples()"""
-        content = content.replace(old, new, 1)
-        with open(io_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        log.info("pyannote io.py patch toegepast: %s", io_path)
+        # Patch via sys.modules zodat pyannote.audio.core.io de fallback ziet
+        import pyannote.audio.core.io as _io_mod
+        _io_mod.AudioDecoder        = _AudioDecoder
+        _io_mod.AudioStreamMetadata = _AudioStreamMetadata
+        # Patch ook de torchcodec module zelf zodat lazy imports werken
+        import types, sys
+        _fake_tc = types.ModuleType("torchcodec")
+        _fake_dec = types.ModuleType("torchcodec.decoders")
+        _fake_dec.AudioDecoder        = _AudioDecoder
+        _fake_dec.AudioStreamMetadata = _AudioStreamMetadata
+        sys.modules.setdefault("torchcodec",          _fake_tc)
+        sys.modules.setdefault("torchcodec.decoders", _fake_dec)
+        log.info("pyannote in-memory patch toegepast (soundfile fallback)")
     except Exception as exc:
         log.warning("pyannote patch mislukt (niet kritiek): %s", exc)
 
