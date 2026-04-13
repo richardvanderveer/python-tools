@@ -9,9 +9,11 @@ hiddenimports = ['tkinterdnd2']
 tmp_ret = collect_all('tkinterdnd2')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
-# pyannote data-bestanden (config.yaml, etc.) — vereist in frozen exe
-datas += collect_data_files('pyannote.audio', includes=['**/*.yaml', '**/*.yml', '**/*.json'])
-datas += collect_data_files('pyannote.core', includes=['**/*.yaml', '**/*.yml'])
+# pyannote — volledige collectie (code + data + binaries)
+# collect_all pikt ook submodules op zoals pyannote.audio.models
+for pkg in ['pyannote.audio', 'pyannote.core', 'pyannote.database', 'pyannote.metrics']:
+    tmp = collect_all(pkg)
+    datas += tmp[0]; binaries += tmp[1]; hiddenimports += tmp[2]
 
 a = Analysis(
     ['transcribe.py'],
