@@ -14,8 +14,8 @@ from __future__ import annotations
 
 # ── Watermerk ─────────────────────────────────────────────────
 __author__    = "Richard van der Veer" 
-__version__   = "2.1.1" 
-__build__     = "2026-04-11"
+__version__   = "2.1.2" 
+__build__     = "2026-04-13"
 __copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
 __watermark__ = "RVDV-TRANSCRIBE-2026-PYTHON-TOOLS"
 
@@ -42,12 +42,42 @@ if sys.platform == "win32":
 warnings.filterwarnings("ignore", message="torchcodec is not installed correctly")
 warnings.filterwarnings("ignore", message="std():")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
+# ── Logging: console + logbestand ────────────────────────────────────────────
+def _setup_logging() -> Path:
+    """Schrijft log naar %APPDATA%\TranscribeApp\transcribe.log (max 1 MB, 2 backups)."""
+    import logging.handlers
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+
+    # Console handler (INFO+)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+    root.addHandler(ch)
+
+    # Bestandshandler (DEBUG+, rotating)
+    log_dir = (
+        Path(os.environ.get("APPDATA", Path.home())) / "TranscribeApp"
+        if sys.platform == "win32"
+        else Path.home() / ".config" / "TranscribeApp"
+    )
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "transcribe.log"
+    fh = logging.handlers.RotatingFileHandler(
+        log_path, maxBytes=1_000_000, backupCount=2, encoding="utf-8"
+    )
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
+    return log_path
+
+_LOG_PATH = _setup_logging()
 log = logging.getLogger("Transcribe")
+log.info("=== Transcribe opgestart | logbestand: %s ===", _LOG_PATH)
 
 APP_TITLE      = f"Transcribe v{__version__}"
 GITHUB_VERSION = "https://raw.githubusercontent.com/richardvanderveer/transcribe-app/main/version.txt"
@@ -498,7 +528,8 @@ class TranscribeWorker:
             try:
                 segments = self._diarize(segments, tmp_wav)
             except Exception as exc:
-                log.warning("Diarisatie mislukt, doorgaan zonder labels: %s", exc)
+                log.error("Diarisatie mislukt: %s", exc, exc_info=True)
+                self.on_progress(0.90, f"Diarisatie mislukt: {exc}")
                 for s in segments:
                     s["speaker"] = "Spreker ?"
 
@@ -937,6 +968,7 @@ def _build_gui(controller: "AppController"):
         ("Kopieer",      controller.copy_to_clipboard),
         ("Open bestand", controller.open_output_file),
         ("Open map",     controller.open_output_folder),
+        ("Open log",     controller.open_log_file),
     ]:
         tk.Button(btn_row, text=label, bg=C_BG, fg=C_TEXT,
                   font=("Segoe UI", 8), relief=tk.GROOVE, bd=1,
@@ -1150,6 +1182,16 @@ class AppController:
                 else subprocess.Popen(["xdg-open", folder])
         else:
             self._show_error("Outputmap niet gevonden.")
+
+    def open_log_file(self) -> None:
+        """Open het logbestand in de standaard teksteditor."""
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(_LOG_PATH))
+            else:
+                subprocess.Popen(["xdg-open", str(_LOG_PATH)])
+        except Exception as exc:
+            self._show_error(f"Logbestand niet gevonden:\n{_LOG_PATH}\n{exc}")
 
     def toggle_edit_mode(self) -> None:
         import tkinter as tk
