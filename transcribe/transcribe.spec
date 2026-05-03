@@ -5,7 +5,12 @@ datas = [('transcribt.ico', '.')]
 binaries = []
 hiddenimports = ['tkinterdnd2']
 
-# faster-whisper: ONNX assets (silero_vad_v6.onnx e.a.) meepakken
+# faster-whisper: volledige collectie inclusief ONNX assets
+for pkg in ['faster_whisper', 'ctranslate2']:
+    tmp = collect_all(pkg)
+    datas += tmp[0]; binaries += tmp[1]; hiddenimports += tmp[2]
+
+# ONNX assets expliciet meepakken (silero_vad_v6.onnx e.a.)
 datas += collect_data_files('faster_whisper', includes=['assets/*'])
 
 # tkinterdnd2
@@ -13,10 +18,30 @@ tmp_ret = collect_all('tkinterdnd2')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 # pyannote — volledige collectie (code + data + binaries)
-# collect_all pikt ook submodules op zoals pyannote.audio.models
-for pkg in ['pyannote.audio', 'pyannote.core', 'pyannote.database', 'pyannote.metrics']:
+for pkg in ['pyannote.audio', 'pyannote.core', 'pyannote.database', 'pyannote.metrics', 'pyannote.pipeline']:
     tmp = collect_all(pkg)
     datas += tmp[0]; binaries += tmp[1]; hiddenimports += tmp[2]
+
+# Extra hiddenimports die PyInstaller mist
+hiddenimports += [
+    'faster_whisper',
+    'faster_whisper.transcribe',
+    'faster_whisper.audio',
+    'faster_whisper.feature_extractor',
+    'faster_whisper.tokenizer',
+    'faster_whisper.vad',
+    'ctranslate2',
+    'huggingface_hub',
+    'tokenizers',
+    'onnxruntime',
+    'av',
+    'torch',
+    'torchaudio',
+    'lightning',
+    'pyannote.audio.pipelines',
+    'pyannote.audio.pipelines.speaker_diarization',
+    'pyannote.audio.models.segmentation',
+]
 
 a = Analysis(
     ['transcribe.py'],
