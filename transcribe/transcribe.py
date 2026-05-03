@@ -14,7 +14,7 @@ from __future__ import annotations
 
 # ── Watermerk ─────────────────────────────────────────────────
 __author__    = "Richard van der Veer" 
-__version__   = "2.1.6" 
+__version__   = "2.1.7" 
 __build__     = "2026-04-13"
 __copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
 __watermark__ = "RVDV-TRANSCRIBE-2026-PYTHON-TOOLS"
