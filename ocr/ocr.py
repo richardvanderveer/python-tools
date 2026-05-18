@@ -1,5 +1,5 @@
 """
-OCR.py  v3.8  —  Offline OCR tool
+OCR.py  v3.9  —  Offline OCR tool
 ===================================
 Engine : Tesseract (volledig offline na installatie)
 Talen  : via Tesseract taalbestanden (.traineddata) — ook offline
@@ -77,7 +77,7 @@ MODI = {
 }
 
 MIN_W = 2500   # minimale breedte voor Tesseract — kleiner = slechter
-APP_VERSION = "3.8"
+APP_VERSION = "3.9"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -216,7 +216,7 @@ def laad(pad):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 ENGINE_TESSERACT = "Tesseract (offline, gedrukt)"
-ENGINE_OLLAMA    = "Ollama Vision (offline, handschrift)"
+ENGINE_OLLAMA    = "Ollama Vision (offline)"
 ENGINE_TROCR     = "TrOCR (offline na download, handschrift)"
 ENGINE_EASYOCR   = "EasyOCR (offline na download, handschrift)"
 ENGINES = [ENGINE_TESSERACT, ENGINE_EASYOCR, ENGINE_OLLAMA, ENGINE_TROCR]
@@ -326,7 +326,7 @@ def _is_vision_model(naam: str) -> bool:
 def ollama_beschikbaar() -> tuple[bool, list[str]]:
     """Controleer of Ollama draait en geef uitsluitend vision-modellen terug."""
     try:
-        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=1) as r:
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=3) as r:
             data = json.loads(r.read())
         alle = [m["name"] for m in data.get("models", [])]
         vision = [m for m in alle if _is_vision_model(m)]
@@ -372,17 +372,37 @@ def ollama_start_en_wacht(status_cb=None, timeout=40) -> tuple[bool, str]:
     if status_cb:
         status_cb(5, "⟳ Ollama starten...")
 
-    try:
-        subprocess.Popen(
-            [exe, "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except Exception as ex:
-        msg = f"Kon Ollama niet starten: {ex}"
-        if status_cb:
-            status_cb(0, f"✗ {msg}")
+    # Methode 1: DETACHED_PROCESS + CREATE_NO_WINDOW (hardcoded hex, niet runtime-afhankelijk)
+    _gestart = False
+    for _methode, _kw in [
+        ("flags",  dict(creationflags=0x00000008 | 0x08000000, close_fds=True,
+                        stdin=subprocess.DEVNULL)),
+        ("shell",  dict(shell=True, stdin=subprocess.DEVNULL)),
+        ("plain",  dict(stdin=subprocess.DEVNULL)),
+    ]:
+        try:
+            _cmd = [exe, "serve"] if _methode != "shell" else f'"{exe}" serve'
+            subprocess.Popen(_cmd, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, **_kw)
+            _gestart = True
+            if status_cb: status_cb(15, f"⟳ Gestart ({_methode}), wachten...")
+            break
+        except Exception:
+            continue
+
+    if not _gestart:
+        import sys
+        if sys.platform == "win32":
+            try:
+                import os as _os; _os.startfile(exe)
+                _gestart = True
+                if status_cb: status_cb(15, "⟳ Gestart (startfile), wachten...")
+            except Exception:
+                pass
+
+    if not _gestart:
+        msg = "Kon Ollama niet starten — open terminal en run: ollama serve"
+        if status_cb: status_cb(0, "✗ Start mislukt")
         return False, msg
 
     start = time.monotonic()
@@ -410,14 +430,7 @@ def ollama_ocr(img_bgr: "np.ndarray", model: str,
                              "Transcribe every line from top to bottom. "
                              "Output only the raw text, no commentary.") -> str:
     """Stuur afbeelding naar Ollama vision model, geef herkende tekst terug."""
-    if not _is_vision_model(model):
-        raise RuntimeError(
-            f"'{model}' is geen vision model en kan geen afbeeldingen lezen.\n\n"
-            "Installeer een vision model via:\n"
-            "  ollama pull llava\n"
-            "  ollama pull llama3.2-vision\n"
-            "  ollama pull qwen2.5-vl:7b"
-        )
+    # Geen strenge vision check — gebruiker kiest zelf
     # Encode naar JPEG bytes
     ok, buf = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
     if not ok:
@@ -464,7 +477,8 @@ _trocr_model     = None
 TROCR_MODELLEN = {
     "large-handwritten (~2.2GB)": "microsoft/trocr-large-handwritten",
     "base-handwritten  (~400MB)": "microsoft/trocr-base-handwritten",
-    "large-printed     (~2.2GB)": "microsoft/trocr-large-printed",
+    # large-printed is uitgeschakeld: incompatibel met transformers>=4.40
+    # (embed_positions._float_tensor buffer blijft op meta-device)
     "base-printed      (~400MB)": "microsoft/trocr-base-printed",
 }
 TROCR_MODEL_ID = "microsoft/trocr-large-handwritten"  # fallback
@@ -523,9 +537,41 @@ def trocr_laden(model_id=None, status_cb=None):
             if status_cb:
                 status_cb(f"⟳ TrOCR laden ({'cache' if offline else 'download'})...")
             _trocr_processor    = TrOCRProcessor.from_pretrained(model_id, **kwargs)
-            _trocr_model        = VisionEncoderDecoderModel.from_pretrained(
-                model_id, **kwargs, device_map=None)
             import torch as _torch
+            # Laad met low_cpu_mem_usage=False om meta-tensors te vermijden.
+            # large-printed heeft een non-persistent buffer (embed_positions._float_tensor)
+            # die als "UNEXPECTED" wordt gemeld maar toch op meta-device belandt.
+            # Na laden: forceer alle resterende meta-tensors naar CPU.
+            _trocr_model        = VisionEncoderDecoderModel.from_pretrained(
+                model_id,
+                low_cpu_mem_usage=False,
+                torch_dtype=_torch.float32,
+                device_map=None,
+                **kwargs,
+            )
+            # Materializeer eventuele resterende meta-tensors/buffers.
+            # get_submodule("") faalt bij toplevel attributen — gebruik _get_parent.
+            def _get_parent(model, dotted_name):
+                parts = dotted_name.split(".")
+                parent = model
+                for p in parts[:-1]:
+                    parent = getattr(parent, p)
+                return parent, parts[-1]
+
+            for name, param in list(_trocr_model.named_parameters()):
+                if param.device.type == "meta":
+                    parent, attr = _get_parent(_trocr_model, name)
+                    setattr(parent, attr,
+                            _torch.nn.Parameter(
+                                _torch.empty(param.shape, dtype=_torch.float32)))
+
+            for name, buf in list(_trocr_model.named_buffers()):
+                if buf is not None and buf.device.type == "meta":
+                    parent, attr = _get_parent(_trocr_model, name)
+                    parent.register_buffer(
+                        attr,
+                        _torch.zeros(buf.shape, dtype=_torch.float32))
+
             _trocr_model        = _trocr_model.to(_torch.device("cpu"))
             _trocr_model.eval()
             _trocr_huidig_model = model_id
@@ -733,13 +779,50 @@ def _is_printed_model(model_id: str) -> bool:
 
 
 def trocr_ocr_printed(img_bgr, model_id=None, status_cb=None, append_cb=None) -> str:
-    """TrOCR gedrukt: per tekstRegel, niet woord-voor-woord."""
+    """
+    TrOCR gedrukt: per tekstRegel via horizontale projectie.
+    Gebruikt OTSU-binarisatie + projectie (geen whiteboard-preprocessing).
+    Merget overlappende detecties om dubbele regels te voorkomen.
+    """
     import torch
     from PIL import Image as PILImage
     trocr_laden(model_id, status_cb)
     if status_cb: status_cb("⟳ TrOCR (gedrukt): regels detecteren...")
-    regels_yx = _detecteer_regels(img_bgr)
-    if not regels_yx: regels_yx = [(0, img_bgr.shape[0])]
+
+    grijs = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if len(img_bgr.shape)==3 else img_bgr.copy()
+    h_img, w_img = grijs.shape
+
+    # OTSU binarisatie — tekst is donker op lichte achtergrond
+    _, bw = cv2.threshold(grijs, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    # Horizontale projectie: aantal donkere pixels per rij
+    proj   = np.sum(bw > 0, axis=1).astype(np.float32)
+    proj_s = cv2.GaussianBlur(proj.reshape(-1, 1), (1, 7), 0).flatten()
+    drempel = max(w_img * 0.008, proj_s.max() * 0.04)
+    min_rh  = max(6, h_img // 55)
+    pad     = max(2, h_img // 90)
+
+    regels_raw, in_r, y0 = [], False, 0
+    for y, val in enumerate(proj_s):
+        if not in_r and val >= drempel:
+            in_r = True; y0 = y
+        elif in_r and val < drempel:
+            in_r = False
+            if (y - y0) >= min_rh:
+                regels_raw.append((max(0, y0 - pad), min(h_img, y + pad)))
+    if in_r and (h_img - y0) >= min_rh:
+        regels_raw.append((max(0, y0 - pad), h_img))
+
+    # Merge overlappende/te-dicht-op-elkaar regels
+    regels_yx: list = []
+    for r0, r1 in regels_raw:
+        if regels_yx and r0 < regels_yx[-1][1] + min_rh:
+            regels_yx[-1] = (regels_yx[-1][0], max(regels_yx[-1][1], r1))
+        else:
+            regels_yx.append((r0, r1))
+    if not regels_yx:
+        regels_yx = [(0, h_img)]
+
     totaal = len(regels_yx)
     if status_cb: status_cb(f"⟳ TrOCR (gedrukt): {totaal} regels...")
     resultaten = []
@@ -747,14 +830,15 @@ def trocr_ocr_printed(img_bgr, model_id=None, status_cb=None, append_cb=None) ->
         strip = img_bgr[y0:y1, :]
         if strip.shape[0] < 5 or strip.shape[1] < 10: continue
         h, w = strip.shape[:2]
-        if h < 48:
-            scale = 48 / h
-            strip = cv2.resize(strip, (int(w * scale), 48), interpolation=cv2.INTER_CUBIC)
+        if h < 32:
+            scale = 32 / h
+            strip = cv2.resize(strip, (int(w * scale), 32), interpolation=cv2.INTER_CUBIC)
         pil = PILImage.fromarray(cv2.cvtColor(strip, cv2.COLOR_BGR2RGB))
         if status_cb: status_cb(f"⟳ TrOCR regel {i+1}/{totaal}...")
         pv = _trocr_processor(images=pil, return_tensors="pt").pixel_values
         with torch.no_grad():
-            ids = _trocr_model.generate(pv, max_new_tokens=128, num_beams=4, early_stopping=True)
+            ids = _trocr_model.generate(pv, max_new_tokens=128,
+                                         num_beams=4, early_stopping=True)
         t = _trocr_processor.batch_decode(ids, skip_special_tokens=True)[0].strip()
         if t:
             resultaten.append(t)
@@ -1533,9 +1617,15 @@ class App(_BASE):
             return tekst, f"EasyOCR | {', '.join(talen)}"
 
         elif engine == ENGINE_OLLAMA:
-            model = self._vo.get()
-            if model.startswith("—"):
-                raise RuntimeError("Selecteer een Ollama model")
+            model = self._vo.get().strip()
+            if not model or model.startswith("—"):
+                raise RuntimeError(
+                    "Geen Ollama model geselecteerd.\n\n"
+                    "Klik 🔄 om beschikbare vision modellen te zoeken,\n"
+                    "of typ een modelnaam handmatig (bijv: llava).\n\n"
+                    "Installeer: ollama pull llava"
+                )
+            def _st(s): self.after(0, lambda: self._vs.set(s))
             return ollama_ocr(img_bgr, model), f"Ollama | {model}"
 
         elif engine == ENGINE_TROCR:
