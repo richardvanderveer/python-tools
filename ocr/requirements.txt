@@ -1,20 +1,7 @@
-# OCR Pro — Python dependencies
-# Runtime (altijd nodig)
 pytesseract==0.3.13
 Pillow==11.2.1
 opencv-python
-numpy
+python-docx==1.1.2
+openpyxl==3.1.5
+python-pptx==1.0.2
 tkinterdnd2==0.4.2
-
-# TrOCR (offline handschrift/gedrukt — worden gedownload bij eerste gebruik)
-torch
-transformers>=4.30.0
-sentencepiece
-
-# EasyOCR (offline handschrift — worden gedownload bij eerste gebruik)
-easyocr
-
-# Ollama: geen pip-pakket nodig, communicatie via HTTP (urllib ingebouwd)
-
-# Optioneel / legacy (niet meer actief gebruikt in UI maar nog in codebase)
-# python-docx==1.1.2

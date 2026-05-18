@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-# ocr.spec — PyInstaller build config voor OCR Pro
-# torch/transformers/easyocr worden NIET gebundeld in de exe
-# (te groot, ~4GB+) — ze worden gedownload bij eerste gebruik.
+# ocr.spec — PyInstaller build config voor OCR Pro v3.9
+# torch/transformers/easyocr worden NIET gebundeld (te groot).
+# hook_sitepkg.py zorgt dat de exe ze vindt in de systeem Python-installatie.
 
 a = Analysis(
     ['ocr.py'],
@@ -9,37 +9,26 @@ a = Analysis(
     binaries=[],
     datas=[],
     hiddenimports=[
-        # Tesseract wrapper
         'pytesseract',
-        # Imaging
         'PIL', 'PIL.Image', 'PIL.ImageOps', 'PIL.ImageFilter', 'PIL.ImageEnhance',
-        # OpenCV
         'cv2',
-        # Tkinter drag-and-drop
         'tkinterdnd2',
-        # Numeriek
         'numpy',
-        # Netwerk (Ollama)
-        'urllib.request', 'urllib.error', 'json', 'base64',
-        # Threading / OS
-        'subprocess', 'threading', 'shutil',
+        'urllib.request', 'urllib.error',
+        'json', 'base64', 'subprocess', 'threading', 'shutil',
     ],
-    hookspath=['.'],       # hook-tkinterdnd2.py staat naast ocr.py
+    hookspath=['.'],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['hook_sitepkg.py'],
     excludes=[
-        # ML-frameworks — niet gebundeld (te groot, optioneel)
         'torch', 'torchaudio', 'torchvision',
         'transformers', 'tokenizers', 'huggingface_hub',
         'easyocr', 'jamo', 'unidecode',
-        # Wetenschappelijk
         'scipy', 'sklearn', 'matplotlib', 'pandas',
         'numba', 'llvmlite',
-        # Overig groot
         'tensorflow', 'pyarrow',
         'sqlalchemy', 'psycopg2', 'grpc',
         'nltk', 'sympy', 'av',
-        # Office-formaten (niet gebruikt in UI)
         'docx', 'openpyxl', 'pptx',
     ],
     noarchive=False,
@@ -60,7 +49,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,           # geen CMD-venster
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
