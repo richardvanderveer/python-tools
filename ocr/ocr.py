@@ -19,6 +19,41 @@ import os
 import base64
 import json
 import traceback
+
+# ── PyInstaller sys.path patch ────────────────────────────────────────────────
+# Wanneer de app als .exe draait (PyInstaller) zijn grote ML-pakketten
+# (torch, transformers, easyocr) niet gebundeld. Dit blok zoekt de systeem
+# Python site-packages op en voegt ze toe aan sys.path zodat de exe die
+# pakketten toch kan vinden als ze op het systeem geïnstalleerd zijn.
+import sys as _sys
+if getattr(_sys, "frozen", False):
+    import os as _os
+    _extra_paths = []
+    # Zoek in %LOCALAPPDATA%\Programs\Python\Python3xx\Lib\site-packages
+    try:
+        _lad = _os.path.expandvars("%LOCALAPPDATA%")
+        _py_root = _os.path.join(_lad, "Programs", "Python")
+        if _os.path.isdir(_py_root):
+            for _d in sorted(_os.listdir(_py_root), reverse=True):
+                _sp = _os.path.join(_py_root, _d, "Lib", "site-packages")
+                if _os.path.isdir(_sp):
+                    _extra_paths.append(_sp)
+                # Roaming site-packages (bijv. easyocr)
+                _ap = _os.path.expandvars("%APPDATA%")
+                _rsp = _os.path.join(_ap, "Python", _d, "site-packages")
+                if _os.path.isdir(_rsp):
+                    _extra_paths.append(_rsp)
+    except Exception:
+        pass
+    # Voeg toe aan sys.path (na positie 0 = eigen _MEIPASS)
+    for _p in _extra_paths:
+        if _p not in _sys.path:
+            _sys.path.insert(1, _p)
+    del _os, _extra_paths
+del _sys
+# ── Einde sys.path patch ─────────────────────────────────────────────────────
+
+import sys
 import threading
 import urllib.request
 import urllib.error
@@ -372,37 +407,17 @@ def ollama_start_en_wacht(status_cb=None, timeout=40) -> tuple[bool, str]:
     if status_cb:
         status_cb(5, "⟳ Ollama starten...")
 
-    # Methode 1: DETACHED_PROCESS + CREATE_NO_WINDOW (hardcoded hex, niet runtime-afhankelijk)
-    _gestart = False
-    for _methode, _kw in [
-        ("flags",  dict(creationflags=0x00000008 | 0x08000000, close_fds=True,
-                        stdin=subprocess.DEVNULL)),
-        ("shell",  dict(shell=True, stdin=subprocess.DEVNULL)),
-        ("plain",  dict(stdin=subprocess.DEVNULL)),
-    ]:
-        try:
-            _cmd = [exe, "serve"] if _methode != "shell" else f'"{exe}" serve'
-            subprocess.Popen(_cmd, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, **_kw)
-            _gestart = True
-            if status_cb: status_cb(15, f"⟳ Gestart ({_methode}), wachten...")
-            break
-        except Exception:
-            continue
-
-    if not _gestart:
-        import sys
-        if sys.platform == "win32":
-            try:
-                import os as _os; _os.startfile(exe)
-                _gestart = True
-                if status_cb: status_cb(15, "⟳ Gestart (startfile), wachten...")
-            except Exception:
-                pass
-
-    if not _gestart:
-        msg = "Kon Ollama niet starten — open terminal en run: ollama serve"
-        if status_cb: status_cb(0, "✗ Start mislukt")
+    try:
+        subprocess.Popen(
+            [exe, "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception as ex:
+        msg = f"Kon Ollama niet starten: {ex}"
+        if status_cb:
+            status_cb(0, f"✗ {msg}")
         return False, msg
 
     start = time.monotonic()
