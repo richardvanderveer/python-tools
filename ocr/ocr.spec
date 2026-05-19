@@ -21,9 +21,10 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=['hook_sitepkg.py'],
     excludes=[
-        'torch', 'torchaudio', 'torchvision',
-        'transformers', 'tokenizers', 'huggingface_hub',
-        'easyocr', 'jamo', 'unidecode',
+        # torch/transformers/easyocr NIET in excludes:
+        # ze worden niet gebundeld (te groot) maar ook niet geblokkeerd.
+        # hook_sitepkg.py zorgt dat de exe ze vindt in de systeem Python-installatie.
+        'torchaudio',
         'scipy', 'sklearn', 'matplotlib', 'pandas',
         'numba', 'llvmlite',
         'tensorflow', 'pyarrow',
