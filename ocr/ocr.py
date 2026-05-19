@@ -40,6 +40,26 @@ if getattr(sys, "frozen", False):
             if os.path.isdir(_sp2) and _sp2 not in sys.path:
                 sys.path.insert(1, _sp2)
 # ── Einde sys.path patch ─────────────────────────────────────────────────────
+
+# ── stdout/stderr patch voor windowed exe ────────────────────────────────────
+# In een PyInstaller windowed exe (console=False) zijn sys.stdout en
+# sys.stderr None. Transformers/torch roepen .isatty() aan wat dan crasht.
+import sys as _sys
+import os as _os
+if getattr(_sys, 'frozen', False) and _sys.stdout is None:
+    import io as _io
+    _log = open(_os.path.join(_os.path.dirname(_sys.executable), 'ocr_log.txt'),
+                'w', encoding='utf-8', errors='replace')
+    _sys.stdout = _log
+    _sys.stderr = _log
+    class _NullIO(_io.IOBase):
+        def write(self, *a): pass
+        def flush(self): pass
+        def isatty(self): return False
+    # Backup voor als log niet lukt
+    if _sys.stdout is None: _sys.stdout = _NullIO()
+    if _sys.stderr is None: _sys.stderr = _NullIO()
+# ── Einde stdout/stderr patch ─────────────────────────────────────────────────
 import threading
 import urllib.request
 import urllib.error
