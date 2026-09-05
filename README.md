@@ -12,7 +12,7 @@ Verzameling van Python desktop tools voor Windows 11.
 
 ## Releases
 
-Collega's downloaden de kant-en-klare `.exe` via GitHub Releases.
+Download de kant-en-klare `.exe` via GitHub Releases.
 Geen Python-installatie vereist.
 
 ## Vereisten per app
