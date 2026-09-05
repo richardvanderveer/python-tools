@@ -5,9 +5,9 @@ cd /d "%~dp0"
 set APPNAAM=Transcribe NL-ENG
 set MONOREPO_APP=transcribe-nlen
 set REPO=C:\github_cicd\python-tools
-set VERFILE=%~dp0010_version_transcribe.txt
-set PYFILE=%~dp0transcribe.py
-set ISSFILE=%~dp0transcribe.iss
+set VERFILE=%~dp0010_version_transcribe-nlen.txt
+set PYFILE=%~dp0transcribe-nlen.py
+set ISSFILE=%~dp0transcribe-nlen.iss
 set PATH=%PATH%;C:\Program Files\Git\bin;C:\Program Files\Git\cmd
 
 echo ================================================
@@ -28,8 +28,8 @@ if "!BERICHT!"=="" set BERICHT=update v!NIEUW!
 :: Versie wegschrijven naar txt
 echo !NIEUW!> "%VERFILE%"
 
-:: Versie bijwerken in transcribe.py + transcribe.iss via PowerShell
-echo [1/6] Versie bijwerken in transcribe.py + transcribe.iss...
+:: Versie bijwerken in transcribe-nlen.py + transcribe-nlen.iss via PowerShell
+echo [1/6] Versie bijwerken in transcribe-nlen.py + transcribe-nlen.iss...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0bump_version.ps1" -Version "!NIEUW!" -PyFile "%PYFILE%" -IssFile "%ISSFILE%"
 if errorlevel 1 (
     echo FOUT bij bijwerken versienummer!
@@ -44,14 +44,14 @@ if not exist "%~dp0.venv\Scripts\activate.bat" (
     py -3.14 -m venv "%~dp0.venv" 2>nul || python -m venv "%~dp0.venv"
 )
 call "%~dp0.venv\Scripts\activate.bat"
-pip install -q -r "%~dp0requirements_transcribe.txt"
+pip install -q -r "%~dp0requirements_transcribe-nlen.txt"
 pip install -q pyinstaller pillow
-python -m PyInstaller transcribe.spec --distpath dist --workpath build --noconfirm
+python -m PyInstaller transcribe-nlen.spec --distpath dist --workpath build --noconfirm
 if errorlevel 1 (
     echo FOUT bij bouwen exe!
     pause & exit /b 1
 )
-echo Lokale exe klaar: %~dp0dist\transcribe.exe
+echo Lokale exe klaar: %~dp0dist\transcribe-nlen.exe
 
 :: Herinnering: ffmpeg/ffprobe worden NIET door PyInstaller meegepakt.
 echo.
@@ -68,14 +68,14 @@ echo.
 echo [4/6] Kopieren naar monorepo (%REPO%\%MONOREPO_APP%)...
 set REPO_APP=%REPO%\%MONOREPO_APP%
 if not exist "%REPO_APP%" mkdir "%REPO_APP%"
-copy /Y "%~dp0transcribe.py"                "%REPO_APP%\transcribe.py"                >nul
-copy /Y "%~dp0transcribt.ico"               "%REPO_APP%\transcribt.ico"               >nul
+copy /Y "%~dp0transcribe-nlen.py"           "%REPO_APP%\transcribe-nlen.py"           >nul
+copy /Y "%~dp0transcribe-nlen.ico"          "%REPO_APP%\transcribe-nlen.ico"          >nul
 copy /Y "%~dp0splash.png"                   "%REPO_APP%\splash.png"                   >nul
-copy /Y "%~dp0transcribe.iss"               "%REPO_APP%\transcribe.iss"               >nul
-copy /Y "%~dp0transcribe_release.bat"       "%REPO_APP%\transcribe_release.bat"       >nul
-copy /Y "%~dp010_version_transcribe.txt"   "%REPO_APP%\010_version_transcribe.txt"   >nul
-copy /Y "%~dp0requirements_transcribe.txt"  "%REPO_APP%\requirements.txt"             >nul
-powershell -NoProfile -Command "(Get-Content '%~dp0transcribe.spec') -replace \"name='transcribe',\", \"name='%MONOREPO_APP%',\" | Set-Content '%REPO_APP%\%MONOREPO_APP%.spec'"
+copy /Y "%~dp0transcribe-nlen.iss"          "%REPO_APP%\transcribe-nlen.iss"          >nul
+copy /Y "%~dp0transcribe-nlen_release.bat"  "%REPO_APP%\transcribe-nlen_release.bat"  >nul
+copy /Y "%~dp0010_version_transcribe-nlen.txt" "%REPO_APP%\010_version_transcribe-nlen.txt" >nul
+copy /Y "%~dp0requirements_transcribe-nlen.txt" "%REPO_APP%\requirements.txt"         >nul
+copy /Y "%~dp0transcribe-nlen.spec"         "%REPO_APP%\transcribe-nlen.spec"         >nul
 echo Klaar.
 
 :: Git commit + push naar de monorepo (alleen de map van deze app aanraken).
@@ -123,13 +123,13 @@ for %%P in (
     if exist %%P set ISCC=%%~P
 )
 if not exist "%ISSFILE%" (
-    echo transcribe.iss niet gevonden — installer-stap overgeslagen.
+    echo transcribe-nlen.iss niet gevonden — installer-stap overgeslagen.
     goto klaar
 )
 if not defined ISCC (
     echo Inno Setup niet gevonden — installer-stap overgeslagen.
     echo Download gratis via https://jrsoftware.org/isdl.php om dit automatisch te
-    echo laten bouwen, of open transcribe.iss handmatig in de Inno Setup IDE.
+    echo laten bouwen, of open transcribe-nlen.iss handmatig in de Inno Setup IDE.
     goto klaar
 )
 if not exist "%~dp0dist\ffmpeg.exe" (
@@ -147,7 +147,7 @@ if errorlevel 1 (
 echo.
 echo ================================================
 echo   Klaar: %APPNAAM% v!NIEUW!
-echo   Lokale exe : %~dp0dist\transcribe.exe
+echo   Lokale exe : %~dp0dist\transcribe-nlen.exe
 echo   Installer  : %~dp0installer_output\TranscribeApp-Setup.exe (indien gebouwd)
 echo   GitHub     : https://github.com/richardvanderveer/python-tools/actions
 echo ================================================

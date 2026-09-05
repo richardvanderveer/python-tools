@@ -24,7 +24,7 @@ if _splash_tpl_patched != _splash_tpl_src:
 else:
     print("Splash-statustekst was al gecentreerd.")
 
-datas = [('transcribt.ico', '.')]
+datas = [('transcribe-nlen.ico', '.')]
 binaries = []
 hiddenimports = ['tkinterdnd2']
 
@@ -67,7 +67,7 @@ hiddenimports += [
 ]
 
 a = Analysis(
-    ['transcribe.py'],
+    ['transcribe-nlen.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
@@ -88,7 +88,7 @@ pyz = PYZ(a.pure)
 # Deze splash wordt door de bootloader zelf getoond, al tijdens het
 # uitpakken, dus vrijwel meteen na de dubbelklik — dat lost het "lijkt
 # vastgelopen"-probleem op zonder dat we naar een map-installatie hoeven
-# over te stappen. transcribe.py sluit de splash vlak voor het
+# over te stappen. transcribe-nlen.py sluit de splash vlak voor het
 # hoofdvenster verschijnt (zie pyi_splash in main()).
 #
 # text_pos staat aan: dat toont tijdens het uitpakken automatisch de
@@ -97,7 +97,7 @@ pyz = PYZ(a.pure)
 # tekent die tekst standaard met een linksonder-ankerpunt (-anchor sw),
 # waardoor langere namen aan de rechterkant afgekapt werden -- vandaar de
 # center-anchor patch bovenaan dit bestand. Zodra Python opstart,
-# overschrijft transcribe.py de tekst met een vriendelijke boodschap (zie
+# overschrijft transcribe-nlen.py de tekst met een vriendelijke boodschap (zie
 # pyi_splash in main()) en sluit de splash vlak voor het hoofdvenster
 # verschijnt.
 splash = Splash(
@@ -134,5 +134,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['transcribt.ico'],
+    icon=['transcribe-nlen.ico'],
 )

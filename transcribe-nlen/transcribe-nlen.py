@@ -1,14 +1,14 @@
 """
 TranscribeApp - Volledig werkende pipeline
 ==========================================
-Bestand  : transcribe.py
+Bestand  : transcribe-nlen.py
 Map      : C:/Users/richa/OneDrive/Bureaublad/Python/scripts/baseline/Claude/Transcribreer/
-Icoon    : transcribt.ico  (zelfde map als dit script)
+Icoon    : transcribe-nlen.ico  (zelfde map als dit script)
 
 Versie   : 2.2.0 (NL/EN, 3 modellen)
 Engine   : faster-whisper 1.2.1 + pyannote.audio 4.x
-Start    : python transcribe.py
-Tests    : python transcribe.py --test
+Start    : python transcribe-nlen.py
+Tests    : python transcribe-nlen.py --test
 """
 from __future__ import annotations
 
@@ -92,8 +92,8 @@ GITHUB_REPO    = "https://github.com/richardvanderveer/transcribe-app"
 # ---------------------------------------------------------------------------
 def _resolve_icon() -> Optional[str]:
     candidates = [
-        Path(getattr(sys, "_MEIPASS", "")) / "transcribt.ico",
-        Path(__file__).resolve().parent / "transcribt.ico",
+        Path(getattr(sys, "_MEIPASS", "")) / "transcribe-nlen.ico",
+        Path(__file__).resolve().parent / "transcribe-nlen.ico",
     ]
     for p in candidates:
         if p.exists():
@@ -1595,7 +1595,7 @@ def main() -> None:
     parser.add_argument("--test", action="store_true")
     args = parser.parse_args()
 
-    # Splash-scherm (alleen aanwezig in de gebouwde exe, zie transcribe.spec).
+    # Splash-scherm (alleen aanwezig in de gebouwde exe, zie transcribe-nlen.spec).
     # De bootloader toont 'm al tijdens het uitpakken van de onefile-exe,
     # dus de gebruiker ziet meteen iets in plaats van 10-15s "niets".
     try:
