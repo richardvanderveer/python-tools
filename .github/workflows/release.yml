@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "transcribe/v*"
+      - "transcribe-nlen/v*"
       - "audioforge/v*"
       - "ocr/v*"
 
@@ -40,7 +41,7 @@ jobs:
           python-version: ${{ steps.pyver.outputs.version }}
 
       - name: Torch CPU (transcribe)
-        if: steps.app.outputs.name == 'transcribe'
+        if: steps.app.outputs.name == 'transcribe' || steps.app.outputs.name == 'transcribe-nlen'
         run: pip install torch==2.10.0 torchaudio --index-url https://download.pytorch.org/whl/cpu
 
       - name: Dependencies
