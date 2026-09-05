@@ -12,7 +12,7 @@
 ;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" transcribe-nlen.iss
 
 #define MyAppName "Transcribe NL-ENG"
-#define MyAppVersion "2.2.6"
+#define MyAppVersion "2.2.7"
 #define MyAppPublisher "Richard van der Veer"
 #define MyAppExeName "transcribe-nlen.exe"
 

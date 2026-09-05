@@ -14,7 +14,7 @@ from __future__ import annotations
 
 # ── Watermerk ─────────────────────────────────────────────────
 __author__    = "Richard van der Veer" 
-__version__   = "2.2.6" 
+__version__   = "2.2.7" 
 __build__     = "2026-09-03"
 __copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
 __watermark__ = "RVDV-TRANSCRIBE-2026-PYTHON-TOOLS"
@@ -83,8 +83,9 @@ log = logging.getLogger("Transcribe")
 log.info("=== Transcribe opgestart | logbestand: %s ===", _LOG_PATH)
 
 APP_TITLE      = f"Transcribe v{__version__}"
-GITHUB_VERSION = "https://raw.githubusercontent.com/richardvanderveer/transcribe-app/main/version.txt"
-GITHUB_REPO    = "https://github.com/richardvanderveer/transcribe-app"
+GITHUB_VERSION     = "https://raw.githubusercontent.com/richardvanderveer/python-tools/main/transcribe-nlen/010_version_transcribe-nlen.txt"
+GITHUB_REPO        = "https://github.com/richardvanderveer/python-tools/releases"
+GITHUB_PROJECT_URL = "https://github.com/richardvanderveer/python-tools/tree/main/transcribe-nlen"
 
 
 # ---------------------------------------------------------------------------
@@ -1105,7 +1106,15 @@ def _build_gui(controller: "AppController"):
     tk.Label(status_bar,
              text=f"{APP_TITLE} · faster-whisper · pyannote · volledig offline · © 2026 Richard van der Veer",
              bg=C_BG, fg=C_MUTED,
-             font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=8)
+             font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(8, 0))
+
+    github_link = tk.Label(status_bar, text="· GitHub",
+                            bg=C_BG, fg=C_MUTED,
+                            font=("Segoe UI", 8, "underline"), cursor="hand2")
+    github_link.pack(side=tk.LEFT, padx=(2, 8))
+    github_link.bind(
+        "<Button-1>",
+        lambda _e: subprocess.Popen(["start", GITHUB_PROJECT_URL], shell=True))
 
     controller._stats_var = tk.StringVar(value="")
     tk.Label(status_bar, textvariable=controller._stats_var,
