@@ -14,7 +14,7 @@ from __future__ import annotations
 
 # ── Watermerk ─────────────────────────────────────────────────
 __author__    = "Richard van der Veer" 
-__version__   = "2.2.7" 
+__version__   = "2.3.0" 
 __build__     = "2026-09-03"
 __copyright__ = "© 2026 Richard van der Veer — github.com/richardvanderveer"
 __watermark__ = "RVDV-TRANSCRIBE-2026-PYTHON-TOOLS"
@@ -41,6 +41,13 @@ if sys.platform == "win32":
 
 warnings.filterwarnings("ignore", message="torchcodec is not installed correctly")
 warnings.filterwarnings("ignore", message="std():")
+
+# Korte timeout voor de 'is dit model nog actueel'-check van huggingface_hub
+# (gebruikt door faster-whisper en pyannote.audio): als een laptop geen
+# internetverbinding heeft, valt de library vanzelf terug op het lokaal
+# gecachte model in plaats van lang te blijven hangen op een trage/afwezige
+# verbinding (standaard timeout is 10s, hier verkort naar 5s).
+os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "5")
 
 # ── Logging: console + logbestand ────────────────────────────────────────────
 def _setup_logging() -> Path:
@@ -267,6 +274,7 @@ class ConfigManager:
         "hf_token":      "",
         "max_speakers":  "auto",
         "diarize_model": "Nauwkeurig (aanbevolen)",
+        "cpu_percent":   "75",
     }
 
     def __init__(self) -> None:
@@ -362,6 +370,89 @@ class Preprocessor:
             err = result.stderr.decode(errors="replace")[-500:]
             raise RuntimeError(f"ffmpeg conversie mislukt:\n{err}")
         return output_wav
+
+
+# ===========================================================================
+# SYSTEEMBRONNEN — CPU/RAM-detectie voor de "CPU-toewijzing"-instelling
+# ===========================================================================
+_CPU_METER_PRIMED = False
+
+
+def _detect_cpu_count() -> int:
+    """Totaal aantal logische CPU-kernen op dit systeem."""
+    return os.cpu_count() or 4
+
+
+def _free_cpu_fraction() -> float:
+    """Fractie (0.0-1.0) van de CPU die op dit moment vrij is.
+
+    psutil.cpu_percent() moet eerst 'geprimed' worden: de allereerste
+    aanroep levert geen bruikbare waarde op. Dat gebeurt hier eenmalig
+    (blokkerend, 0.3s); alle volgende aanroepen zijn instant
+    (niet-blokkerend) en meten het CPU-gebruik sinds de vorige aanroep.
+    Geen psutil beschikbaar -> aanname "100% vrij" (het gekozen percentage
+    slaat dan gewoon op het totaal aantal kernen).
+    """
+    global _CPU_METER_PRIMED
+    try:
+        import psutil
+        if not _CPU_METER_PRIMED:
+            psutil.cpu_percent(interval=0.3)
+            _CPU_METER_PRIMED = True
+            return 1.0
+        used = psutil.cpu_percent(interval=None)
+        return max(0.0, min(1.0, 1.0 - used / 100.0))
+    except Exception:
+        return 1.0
+
+
+def _free_ram_info() -> tuple[float, float, float]:
+    """(gebruikt_pct, vrij_GB, totaal_GB) op dit moment. Geen psutil -> nullen."""
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        return vm.percent, vm.available / (1024 ** 3), vm.total / (1024 ** 3)
+    except Exception:
+        return 0.0, 0.0, 0.0
+
+
+def _resolve_cpu_threads(percent: int, free_fraction: float, total_cores: int) -> int:
+    """Rekent een percentage van de vrije CPU-capaciteit om naar een
+    concreet aantal threads voor faster-whisper/pyannote."""
+    budget = free_fraction * total_cores
+    threads = round(budget * percent / 100.0)
+    return max(1, min(threads, total_cores))
+
+
+def _parse_cpu_percent(label: str) -> int:
+    """Haalt het percentage uit een GUI-label als '75% van vrije CPU'."""
+    try:
+        return int(label.split("%")[0].strip())
+    except (ValueError, IndexError):
+        return 75
+
+
+def _friendly_model_error(exc: Exception) -> str:
+    """Herkent een netwerkgerelateerde fout bij het laden van een model
+    (typisch: allereerste gebruik zonder internet, model nog niet lokaal
+    gecached) en geeft dan een duidelijke uitleg i.p.v. de ruwe foutmelding."""
+    text = str(exc).lower()
+    network_hints = (
+        "connection", "timed out", "timeout", "network", "resolve",
+        "offline", "getaddrinfo", "max retries", "name or service",
+        "newconnectionerror", "temporary failure",
+    )
+    if any(hint in text for hint in network_hints):
+        return (
+            "Geen internetverbinding en het model is nog niet eerder "
+            "gedownload.\n\nBij het allereerste gebruik van deze app is "
+            "eenmalig internet nodig om de taalmodellen op te halen "
+            "(enkele honderden MB tot een paar GB, afhankelijk van het "
+            "gekozen model). Daarna werkt alles volledig offline.\n\n"
+            "Controleer de internetverbinding en probeer het opnieuw."
+            f"\n\n(Technische melding: {exc})"
+        )
+    return str(exc)
 
 
 # ===========================================================================
@@ -488,7 +579,8 @@ class TranscribeWorker:
                  output_mode: str, hf_token: str, max_speakers: Optional[int],
                  diarize_model: str,
                  on_progress: ProgressCallback,
-                 on_result: ResultCallback) -> None:
+                 on_result: ResultCallback,
+                 cpu_threads: int = 0) -> None:
         self.input_path    = input_path
         self.language      = language
         self.model         = model
@@ -498,6 +590,9 @@ class TranscribeWorker:
         self.diarize_model = diarize_model
         self.on_progress   = on_progress
         self.on_result     = on_result
+        # 0 = laat faster-whisper/ctranslate2 zelf de default kiezen
+        # (zie _resolve_cpu_threads voor hoe de GUI dit invult).
+        self.cpu_threads   = cpu_threads
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
@@ -553,11 +648,13 @@ class TranscribeWorker:
         self.on_progress(0.15, f"Whisper model laden ({self.model})...")
         try:
             from faster_whisper import WhisperModel
-            fw_model = WhisperModel(model_name, device="cpu", compute_type="int8")
-            log.info("WhisperModel geladen: %s", model_name)
+            fw_model = WhisperModel(model_name, device="cpu", compute_type="int8",
+                                     cpu_threads=self.cpu_threads)
+            log.info("WhisperModel geladen: %s (cpu_threads=%d)",
+                     model_name, self.cpu_threads)
         except Exception as exc:
             _cleanup(tmp_wav)
-            self.on_result("", [], f"Model laden mislukt: {exc}")
+            self.on_result("", [], f"Model laden mislukt:\n{_friendly_model_error(exc)}")
             return
 
         if self._stop_event.is_set():
@@ -622,7 +719,7 @@ class TranscribeWorker:
                 segments = self._diarize(segments, tmp_wav)
             except Exception as exc:
                 log.error("Diarisatie mislukt: %s", exc, exc_info=True)
-                self.on_progress(0.90, f"Diarisatie mislukt: {exc}")
+                self.on_progress(0.90, f"Diarisatie mislukt: {_friendly_model_error(exc)}")
                 for s in segments:
                     s["speaker"] = "Spreker ?"
 
@@ -647,6 +744,8 @@ class TranscribeWorker:
         self.on_progress(0.80, f"Diarisatie laden ({self.diarize_model})...")
 
         pipeline = Pipeline.from_pretrained(model_id, token=self.hf_token)
+        if self.cpu_threads > 0:
+            torch.set_num_threads(self.cpu_threads)
         pipeline.to(torch.device("cpu"))
 
         try:
@@ -812,8 +911,8 @@ def _build_gui(controller: "AppController"):
     from tkinter import filedialog, ttk
 
     root.title(APP_TITLE)
-    root.geometry("860x820")
-    root.minsize(740, 740)
+    root.geometry("860x960")
+    root.minsize(740, 880)
     controller.root = root
 
     _icon = _resolve_icon()
@@ -873,6 +972,7 @@ def _build_gui(controller: "AppController"):
                              state="readonly", width=16)
         combo.set(default)
         combo.pack(side=tk.LEFT)
+        return combo
 
     # ── Invoerbestand ────────────────────────────────────────────────
     card_file = card(left, "Invoerbestand")
@@ -993,6 +1093,46 @@ def _build_gui(controller: "AppController"):
              text="Klik 'Wijzig' om token te bewerken, 'Vergrendel' om op te slaan",
              bg=C_PANEL, fg=C_MUTED, font=("Segoe UI", 7),
              wraplength=270, justify="left").pack(anchor="w")
+
+    # ── Systeembronnen ───────────────────────────────────────────────
+    card_resources = card(left, "Systeembronnen")
+
+    controller._cpu_meter_var = tk.StringVar(value="CPU: meten...")
+    controller._ram_meter_var = tk.StringVar(value="RAM: meten...")
+    tk.Label(card_resources, textvariable=controller._cpu_meter_var,
+             bg=C_PANEL, fg=C_TEXT, font=("Segoe UI", 8),
+             anchor="w").pack(fill=tk.X)
+    tk.Label(card_resources, textvariable=controller._ram_meter_var,
+             bg=C_PANEL, fg=C_TEXT, font=("Segoe UI", 8),
+             anchor="w").pack(fill=tk.X, pady=(0, 4))
+
+    controller._cpu_percent_var = tk.StringVar()
+    saved_cpu_pct = controller.config.get("cpu_percent")
+    cpu_pct_options = ["25% van vrije CPU", "50% van vrije CPU",
+                        "75% van vrije CPU", "100% van vrije CPU"]
+    cpu_pct_default = next(
+        (o for o in cpu_pct_options if o.startswith(f"{saved_cpu_pct}%")),
+        "75% van vrije CPU")
+    controller._cpu_pct_combo = labeled_combo(
+        card_resources, "CPU-toewijzing:", controller._cpu_percent_var,
+        cpu_pct_options, cpu_pct_default)
+
+    cpu_pct_info = tk.Label(card_resources, text="", bg=C_PANEL, fg=C_MUTED,
+                            font=("Segoe UI", 7), wraplength=270,
+                            justify="left", anchor="w")
+    cpu_pct_info.pack(fill=tk.X, pady=(2, 0))
+
+    def _update_cpu_pct_info(*_):
+        pct = _parse_cpu_percent(controller._cpu_percent_var.get())
+        threads = _resolve_cpu_threads(
+            pct, controller._last_free_fraction, controller._total_cores)
+        cpu_pct_info.config(
+            text=f"Bij {pct}%: {threads} van {controller._total_cores} "
+                 f"kernen voor transcriptie (vergrendeld zodra deze start).")
+
+    controller._cpu_percent_var.trace_add("write", _update_cpu_pct_info)
+    controller._update_cpu_pct_info = _update_cpu_pct_info
+    _update_cpu_pct_info()
 
     # ── Uitvoer ──────────────────────────────────────────────────────
     card_output = card(left, "Uitvoer")
@@ -1122,6 +1262,7 @@ def _build_gui(controller: "AppController"):
              font=("Segoe UI", 8)).pack(side=tk.RIGHT, padx=8)
 
     root.protocol("WM_DELETE_WINDOW", controller.on_close)
+    root.after(200, controller._refresh_resource_meters)
     return root
 
 
@@ -1157,14 +1298,27 @@ class AppController:
         self._btn_stop           = None
         self._btn_edit           = None
 
+        # Systeembronnen (CPU/RAM-toewijzing)
+        self._total_cores         = _detect_cpu_count()
+        self._last_free_fraction  = 1.0
+        self._cpu_meter_var       = None
+        self._ram_meter_var       = None
+        self._cpu_percent_var     = None
+        self._cpu_pct_combo       = None
+        self._update_cpu_pct_info = None
+        self._cpu_meter_job       = None
+
     def set_input_file(self, path: str) -> None:
         ext = Path(path).suffix.lower()
         if ext not in Preprocessor.SUPPORTED_EXTENSIONS:
             self._show_error(f"Niet-ondersteund formaat: {ext}")
             return
         self._file_var.set(path)
-        if not self._output_var.get():
-            self._output_var.set(str(Path(path).with_suffix(".txt")))
+        # Altijd herberekenen op basis van het nieuwe bestand. Eerder werd
+        # dit alleen gezet als het veld nog leeg was, waardoor na de eerste
+        # transcriptie elk volgend bestand de output van het vorige bestand
+        # overschreef (bug, gemeld door gebruiker).
+        self._output_var.set(str(Path(path).with_suffix(".txt")))
         if self.root:
             self.root.title(f"{APP_TITLE} — {Path(path).name}")
 
@@ -1211,6 +1365,15 @@ class AppController:
                         if self._max_speakers_var else "auto")
         self.config.set("diarize_model", diarize_model)
 
+        cpu_percent = _parse_cpu_percent(
+            self._cpu_percent_var.get() if self._cpu_percent_var else "75%")
+        self.config.set("cpu_percent", str(cpu_percent))
+        cpu_threads = _resolve_cpu_threads(
+            cpu_percent, self._last_free_fraction, self._total_cores)
+        log.info("CPU-toewijzing: %d%% van vrije capaciteit -> %d threads "
+                 "(van %d kernen totaal)",
+                 cpu_percent, cpu_threads, self._total_cores)
+
         self._start_time = time.time()
         self._stats_var.set("")
         self._set_busy(True)
@@ -1225,6 +1388,7 @@ class AppController:
             output_mode=mode, hf_token=token, max_speakers=max_speakers,
             diarize_model=diarize_model,
             on_progress=self._on_progress, on_result=self._on_result,
+            cpu_threads=cpu_threads,
         )
         self._worker.start()
 
@@ -1354,16 +1518,26 @@ class AppController:
                          self._on_export_done).start()
 
     def notify_update(self, remote_version: str) -> None:
-        if not self._update_label or not self.root:
+        if not self.root:
             return
         def _show():
-            self._update_label.config(
-                text=f"Nieuwe versie v{remote_version} beschikbaar — klik om te downloaden"
-            )
-            self._update_label.bind(
-                "<Button-1>",
-                lambda _e: subprocess.Popen(
-                    ["start", GITHUB_REPO], shell=True)
+            if self._update_label:
+                self._update_label.config(
+                    text=f"Nieuwe versie v{remote_version} beschikbaar — klik om te downloaden"
+                )
+                self._update_label.bind(
+                    "<Button-1>",
+                    lambda _e: subprocess.Popen(
+                        ["start", GITHUB_REPO], shell=True)
+                )
+            import tkinter.messagebox as mb
+            mb.showinfo(
+                "Update beschikbaar",
+                f"Er is een nieuwere versie beschikbaar: v{remote_version}.\n\n"
+                f"Update nu via:\n{GITHUB_REPO}\n\n"
+                "Deze melding verschijnt opnieuw bij de volgende keer "
+                "opstarten, totdat de update is geïnstalleerd.",
+                parent=self.root,
             )
         self.root.after(0, _show)
 
@@ -1448,12 +1622,45 @@ class AppController:
         if not self._edit_mode:
             self._preview_text.config(state=tk.DISABLED, bg="#FFFFFF")
 
+    def _refresh_resource_meters(self) -> None:
+        """Ververst de CPU/RAM-meters, zowel in rust als tijdens transcriptie.
+        Plant zichzelf elke 2 seconden opnieuw in zolang het venster leeft."""
+        if not self.root:
+            return
+        try:
+            free_fraction = _free_cpu_fraction()
+            self._last_free_fraction = free_fraction
+            used_pct = round((1.0 - free_fraction) * 100)
+            free_cores = round(free_fraction * self._total_cores)
+            if self._cpu_meter_var:
+                self._cpu_meter_var.set(
+                    f"CPU: {used_pct}% in gebruik — {free_cores} van "
+                    f"{self._total_cores} kernen vrij")
+
+            ram_pct, ram_free_gb, ram_total_gb = _free_ram_info()
+            if self._ram_meter_var:
+                self._ram_meter_var.set(
+                    f"RAM: {round(ram_pct)}% in gebruik — {ram_free_gb:.1f} GB "
+                    f"vrij van {ram_total_gb:.1f} GB")
+
+            if self._update_cpu_pct_info:
+                self._update_cpu_pct_info()
+
+            self._cpu_meter_job = self.root.after(2000, self._refresh_resource_meters)
+        except Exception:
+            pass  # venster waarschijnlijk gesloten; stop stil
+
     def _set_busy(self, busy: bool) -> None:
         import tkinter as tk
         if self._btn_start:
             self._btn_start.config(state=tk.DISABLED if busy else tk.NORMAL)
         if self._btn_stop:
             self._btn_stop.config(state=tk.NORMAL if busy else tk.DISABLED)
+        if self._cpu_pct_combo:
+            # Vergrendeld zodra de transcriptie loopt: het aantal threads
+            # ligt dan al vast in het geladen model en kan niet meer
+            # live worden bijgesteld.
+            self._cpu_pct_combo.config(state=tk.DISABLED if busy else "readonly")
 
     def _show_error(self, message: str) -> None:
         import tkinter.messagebox as mb
@@ -1464,6 +1671,11 @@ class AppController:
     def on_close(self) -> None:
         if self._worker and self._worker.is_alive():
             self._worker.stop()
+        if self._cpu_meter_job and self.root:
+            try:
+                self.root.after_cancel(self._cpu_meter_job)
+            except Exception:
+                pass
         if self.root:
             self.root.destroy()
 

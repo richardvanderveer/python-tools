@@ -58,6 +58,7 @@ hiddenimports += [
     'tokenizers',
     'onnxruntime',
     'av',
+    'psutil',
     'torch',
     'torchaudio',
     'lightning',
