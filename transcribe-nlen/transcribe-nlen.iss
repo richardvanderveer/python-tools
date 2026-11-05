@@ -21,6 +21,11 @@ AppId={{75656011-5089-4FA2-BD4E-190CBB789B07}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+; Voorkomt dat de gebruiker per ongeluk meerdere installatiewizards tegelijk
+; opstart (bv. door dubbel te klikken terwijl de ~385 MB setup nog laadt):
+; een tweede gelijktijdige start wordt geweigerd met een duidelijke melding
+; in plaats van een nieuwe wizard te openen.
+AppMutex=TranscribeNLENGSetupMutex
 DefaultDirName={localappdata}\TranscribeApp
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
