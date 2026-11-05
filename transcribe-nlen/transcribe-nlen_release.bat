@@ -58,7 +58,7 @@ echo.
 echo [3/6] Controle ffmpeg...
 if not exist "%~dp0dist\ffmpeg.exe" (
     echo LET OP: ffmpeg.exe ontbreekt in dist\ — kopieer ffmpeg.exe en ffprobe.exe
-    echo         handmatig naar dist\ voordat je uitdeelt aan collega's.
+    echo         handmatig naar dist\ voordat je uitdeelt aan gebruikers.
 ) else (
     echo ffmpeg.exe gevonden in dist\
 )
